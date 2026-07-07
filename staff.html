@@ -21,7 +21,12 @@
   <div class="container" id="loginView" style="max-width: 420px; padding-top: 60px; display:none;">
     <div class="card">
       <h2 style="margin-bottom:4px;">Staff login</h2>
-      <p class="muted">Accounts are created by an admin in Supabase.</p>
+      <p class="muted">Sign in with Google, or use an email account created by an admin. Only authorized staff can access the dashboard.</p>
+      <button type="button" class="btn google" id="googleBtn" style="width:100%; margin-top:16px;">
+        <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+        Sign in with Google
+      </button>
+      <div class="divider">or use email</div>
       <form id="loginForm">
         <label for="lEmail">Email</label>
         <input id="lEmail" type="email" required>
@@ -35,6 +40,7 @@
 
   <!-- ============ DASHBOARD ============ -->
   <div class="container" id="dashView" style="padding-top: 24px; padding-bottom: 60px; display:none;">
+    <div class="msg" id="dashMsg"></div>
     <div class="tabs">
       <button data-tab="calendar" class="active">&#128197; Calendar</button>
       <button data-tab="avail">&#9200; My Availability</button>
@@ -202,8 +208,23 @@
 
     // ================= Auth =================
     async function init() {
-      const { data: { session } } = await db.auth.getSession();
-      if (session) enterDash(session.user); else showLogin();
+      if (!db) { // config.js already shows the red banner explaining why
+        showLogin();
+        showMsg('loginMsg', 'Cannot sign in until Supabase is configured — see the banner above.', 'error');
+        return;
+      }
+      // OAuth failures come back in the URL hash (e.g. cancelled consent)
+      const hashParams = new URLSearchParams(location.hash.replace(/^#/, ''));
+      const oauthError = hashParams.get('error_description') || hashParams.get('error');
+      try {
+        const { data: { session } } = await db.auth.getSession();
+        if (session) { await enterDash(session.user); return; }
+        showLogin();
+        if (oauthError) showMsg('loginMsg', 'Google sign-in failed: ' + oauthError, 'error');
+      } catch (e) {
+        showLogin();
+        showMsg('loginMsg', 'Could not reach Supabase: ' + e.message, 'error');
+      }
     }
     function showLogin() {
       document.getElementById('loginView').style.display = 'block';
@@ -212,17 +233,51 @@
       document.getElementById('whoami').textContent = '';
     }
     async function enterDash(user) {
+      // Anyone with a Google account can sign IN — only allowlisted
+      // staff (staff_emails table) may enter the dashboard.
+      const { data: isStaff, error: staffErr } = await db.rpc('is_staff');
+      if (staffErr) {
+        showLogin();
+        showMsg('loginMsg', 'Could not verify staff access: ' + staffErr.message +
+          ' (has supabase/migration_google_auth.sql been run?)', 'error');
+        return;
+      }
+      if (!isStaff) {
+        await db.auth.signOut();
+        showLogin();
+        showMsg('loginMsg', 'This account is not authorized as staff.', 'error');
+        return;
+      }
       me = user;
       document.getElementById('loginView').style.display = 'none';
       document.getElementById('dashView').style.display = 'block';
       document.getElementById('logoutBtn').style.display = 'inline-block';
       await loadBaseData();
+      if (!myProfile) await createMissingProfile();
       document.getElementById('whoami').textContent = myProfile ? myProfile.display_name : user.email;
       renderCalendar();
       loadAvail(); loadSlotAdmin(); loadBookings(); loadPoolAdmin(); fillProfileForm();
     }
+    // A staff member allowlisted *after* their first sign-in has no
+    // auto-created profile — create it here from the Google display name.
+    async function createMissingProfile() {
+      const meta = me.user_metadata || {};
+      const name = (meta.full_name || meta.name || '').trim() || me.email.split('@')[0];
+      const { error } = await db.from('profiles').insert({ id: me.id, display_name: name });
+      if (error) { showMsg('dashMsg', 'Could not create your coach profile: ' + error.message, 'error'); return; }
+      await loadBaseData();
+    }
+    document.getElementById('googleBtn').onclick = async () => {
+      if (!db) { showMsg('loginMsg', 'Cannot sign in until Supabase is configured — see the banner above.', 'error'); return; }
+      const { error } = await db.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: location.origin + location.pathname }
+      });
+      if (error) showMsg('loginMsg', 'Google sign-in failed: ' + error.message, 'error');
+    };
     document.getElementById('loginForm').onsubmit = async (e) => {
       e.preventDefault();
+      if (!db) { showMsg('loginMsg', 'Cannot sign in until Supabase is configured — see the banner above.', 'error'); return; }
       const { data, error } = await db.auth.signInWithPassword({
         email: document.getElementById('lEmail').value,
         password: document.getElementById('lPass').value
@@ -238,6 +293,8 @@
         db.from('pools').select('*').order('name'),
         db.from('profiles').select('*').order('display_name')
       ]);
+      if (p.error || c.error)
+        showMsg('dashMsg', 'Could not load pools/coaches: ' + (p.error || c.error).message, 'error');
       pools = p.data || []; coaches = c.data || [];
       myProfile = coaches.find(x => x.id === me.id) || null;
 
@@ -277,6 +334,8 @@
           .gte('starts_at', calStart.toISOString()).lt('starts_at', end.toISOString())
           .neq('status', 'cancelled')
       ]);
+      if (av.error || sl.error)
+        showMsg('dashMsg', 'Could not load the calendar: ' + (av.error || sl.error).message, 'error');
 
       document.getElementById('calLegend').innerHTML = coaches.map(c =>
         `<span style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;font-size:0.82rem;">
@@ -389,11 +448,12 @@
       loadAvail(); renderCalendar();
     };
     async function loadAvail() {
-      const { data } = await db.from('availability').select('*, pools(name)')
+      const { data, error } = await db.from('availability').select('*, pools(name)')
         .eq('coach_id', me.id)
         .gte('day', new Date().toISOString().slice(0,10))
         .order('day').order('start_time');
       const el = document.getElementById('availList');
+      if (error) { el.innerHTML = ''; showMsg('availMsg', 'Could not load availability: ' + error.message, 'error'); return; }
       if (!data || !data.length) { el.innerHTML = '<p class="empty">Nothing scheduled yet.</p>'; return; }
       el.innerHTML = '<table><tr><th>Date</th><th>Time</th><th>Pool</th><th>Note</th><th></th></tr>' +
         data.map(a => `<tr>
@@ -434,11 +494,12 @@
       loadSlotAdmin(); renderCalendar();
     };
     async function loadSlotAdmin() {
-      const { data } = await db.from('slots').select('*, pools(name), profiles(display_name)')
+      const { data, error } = await db.from('slots').select('*, pools(name), profiles(display_name)')
         .gte('starts_at', new Date().toISOString())
         .neq('status', 'cancelled')
         .order('starts_at').limit(100);
       const el = document.getElementById('slotAdminList');
+      if (error) { el.innerHTML = ''; showMsg('slotMsg', 'Could not load slots: ' + error.message, 'error'); return; }
       if (!data || !data.length) { el.innerHTML = '<p class="empty">No upcoming slots.</p>'; return; }
       el.innerHTML = '<table><tr><th>When</th><th>Pool</th><th>Coach</th><th>Status</th><th></th></tr>' +
         data.map(s => `<tr>

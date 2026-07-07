@@ -48,12 +48,19 @@
   <script src="config.js"></script>
   <script>
     async function load() {
+      const cg = document.getElementById('coachGrid');
+      const pg = document.getElementById('poolGrid');
+      if (!db) { // config.js already shows the red banner explaining why
+        cg.innerHTML = pg.innerHTML = '<p class="empty">Unavailable — the site is not connected to Supabase yet.</p>';
+        return;
+      }
       const [coaches, pools] = await Promise.all([
         db.from('profiles').select('display_name, bio').eq('is_public', true),
         db.from('pools').select('name, address, notes').eq('active', true)
       ]);
+      if (coaches.error || pools.error)
+        showFatalError('Could not load site data: ' + (coaches.error || pools.error).message);
 
-      const cg = document.getElementById('coachGrid');
       if (coaches.data && coaches.data.length) {
         cg.innerHTML = coaches.data.map(c => `
           <div class="card coach-card">
@@ -65,7 +72,6 @@
         cg.innerHTML = '<p class="empty">Coach bios coming soon.</p>';
       }
 
-      const pg = document.getElementById('poolGrid');
       if (pools.data && pools.data.length) {
         pg.innerHTML = pools.data.map(p => `
           <div class="card coach-card">
@@ -79,7 +85,7 @@
       }
     }
     function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
-    load();
+    load().catch(e => showFatalError('Could not load site data: ' + e.message));
   </script>
 </body>
 </html>

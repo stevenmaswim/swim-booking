@@ -93,7 +93,8 @@
     }
 
     async function loadPools() {
-      const { data } = await db.from('pools').select('id, name').eq('active', true).order('name');
+      const { data, error } = await db.from('pools').select('id, name').eq('active', true).order('name');
+      if (error) showMsg('listMsg', 'Could not load pools: ' + error.message, 'error');
       pools = data || [];
       const sel = document.getElementById('poolFilter');
       pools.forEach(p => {
@@ -103,6 +104,7 @@
     }
 
     async function loadSlots() {
+      if (!db) return; // config error banner is already visible
       const list = document.getElementById('slotList');
       list.innerHTML = '<p class="empty">Loading…</p>';
       const weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate() + 7);
@@ -120,7 +122,11 @@
       if (pf) q = q.eq('pool_id', pf);
 
       const { data, error } = await q;
-      if (error) { showMsg('listMsg', 'Could not load slots: ' + error.message, 'error'); return; }
+      if (error) {
+        list.innerHTML = '<p class="empty">Available times could not be loaded.</p>';
+        showMsg('listMsg', 'Could not load slots: ' + error.message, 'error');
+        return;
+      }
       if (!data || !data.length) {
         list.innerHTML = '<p class="empty">No open times this week — try another week or check back soon!</p>';
         return;
@@ -189,6 +195,7 @@
     if (cancelToken) {
       document.getElementById('cancelPanel').style.display = 'block';
       document.getElementById('cancelBtn').onclick = async () => {
+        if (!db) { showMsg('cancelMsg', 'Cancellation is unavailable until the site is configured — see the banner above.', 'error'); return; }
         const { error } = await db.rpc('cancel_booking', { p_token: cancelToken });
         if (error) { showMsg('cancelMsg', error.message, 'error'); return; }
         showMsg('cancelMsg', 'Your booking has been cancelled. The spot is open again.', 'success');
@@ -201,7 +208,14 @@
     document.getElementById('nextWeek').onclick = () => { weekStart.setDate(weekStart.getDate() + 7); loadSlots(); };
     document.getElementById('poolFilter').onchange = loadSlots;
 
-    loadPools().then(loadSlots);
+    if (db) {
+      loadPools().then(loadSlots).catch(e =>
+        showMsg('listMsg', 'Could not reach Supabase: ' + e.message, 'error'));
+    } else {
+      document.getElementById('slotList').innerHTML =
+        '<p class="empty">Booking is unavailable until the site is configured.</p>';
+      showMsg('listMsg', 'This site is not connected to Supabase yet — see the banner above.', 'error');
+    }
   </script>
 </body>
 </html>
