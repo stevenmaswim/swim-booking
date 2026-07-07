@@ -330,7 +330,7 @@
       const [av, sl] = await Promise.all([
         db.from('availability').select('*, profiles(display_name), pools(name)')
           .gte('day', calStart.toISOString().slice(0,10)).lt('day', end.toISOString().slice(0,10)),
-        db.from('slots').select('*, profiles(display_name), pools(name)')
+        db.from('slots').select('*, profiles!coach_id(display_name), pools(name)')
           .gte('starts_at', calStart.toISOString()).lt('starts_at', end.toISOString())
           .neq('status', 'cancelled')
       ]);
@@ -494,7 +494,7 @@
       loadSlotAdmin(); renderCalendar();
     };
     async function loadSlotAdmin() {
-      const { data, error } = await db.from('slots').select('*, pools(name), profiles(display_name)')
+      const { data, error } = await db.from('slots').select('*, pools(name), profiles!coach_id(display_name)')
         .gte('starts_at', new Date().toISOString())
         .neq('status', 'cancelled')
         .order('starts_at').limit(100);
@@ -522,7 +522,7 @@
     // ================= Bookings =================
     async function loadBookings() {
       const { data, error } = await db.from('bookings')
-        .select('*, slots!inner(starts_at, duration_min, pools(name), profiles(display_name))')
+        .select('*, slots!inner(starts_at, duration_min, pools(name), profiles!coach_id(display_name))')
         .eq('status', 'confirmed')
         .gte('slots.starts_at', new Date().toISOString())
         .order('created_at', { ascending: false }).limit(200);

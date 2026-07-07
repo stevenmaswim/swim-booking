@@ -113,7 +113,7 @@
         new Date(weekEnd - 1).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
       let q = db.from('slots')
-        .select('id, starts_at, duration_min, pool_id, pools(name), profiles(display_name)')
+        .select('id, starts_at, duration_min, pool_id, pools(name), profiles!coach_id(display_name)')
         .eq('status', 'open')
         .gte('starts_at', new Date(Math.max(weekStart, Date.now())).toISOString())
         .lt('starts_at', weekEnd.toISOString())
