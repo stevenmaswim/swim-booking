@@ -423,9 +423,13 @@
         if (!confirm(s.status === 'booked'
           ? 'This slot is BOOKED. Cancelling removes the booking too. Continue?'
           : 'Cancel this open slot?')) return;
-        if (s.status === 'booked')
-          await db.from('bookings').update({ status: 'cancelled' }).eq('slot_id', s.id).eq('status','confirmed');
-        await db.from('slots').update({ status: 'cancelled' }).eq('id', s.id);
+        if (s.status === 'booked') {
+          const { error: bErr } = await db.from('bookings').update({ status: 'cancelled' }).eq('slot_id', s.id).eq('status','confirmed');
+          if (bErr) { alert('Could not cancel the booking: ' + bErr.message); return; }
+        }
+        const { data, error } = await db.from('slots').update({ status: 'cancelled' }).eq('id', s.id).select('id');
+        if (error) { alert('Could not cancel the slot: ' + error.message); return; }
+        if (!data || !data.length) { alert('The slot could not be cancelled — please reload and try again.'); return; }
         document.getElementById('slotModal').classList.remove('show');
         renderCalendar(); loadSlotAdmin(); loadBookings();
       };
@@ -493,6 +497,38 @@
       showMsg('slotMsg', `Published ${count} slot${count > 1 ? 's' : ''}.`, 'success');
       loadSlotAdmin(); renderCalendar();
     };
+    // Cancels one or many slots at once. `items` is [{id, status}].
+    // Cancels any bookings on booked slots first, then the slots — and
+    // reports how many actually cancelled so a silent no-op never looks
+    // like success. Used by both the per-row and "Cancel selected" buttons.
+    async function cancelSlots(items) {
+      if (!items.length) return;
+      const ids = items.map(i => i.id);
+      const bookedIds = items.filter(i => i.status === 'booked').map(i => i.id);
+      const n = ids.length;
+      const bookedNote = bookedIds.length
+        ? ` ${bookedIds.length} ${bookedIds.length === 1 ? 'is' : 'are'} BOOKED — those bookings will be cancelled too.`
+        : '';
+      if (!confirm(`Cancel ${n} slot${n === 1 ? '' : 's'}?${bookedNote}`)) return;
+      if (bookedIds.length) {
+        const { error: bErr } = await db.from('bookings').update({ status: 'cancelled' })
+          .in('slot_id', bookedIds).eq('status', 'confirmed');
+        if (bErr) { showMsg('slotMsg', 'Could not cancel the bookings: ' + bErr.message, 'error'); return; }
+      }
+      // .select() returns the rows actually updated — 0 means nothing changed
+      // (e.g. blocked by security rules) even though no error was thrown.
+      const { data, error } = await db.from('slots').update({ status: 'cancelled' })
+        .in('id', ids).select('id');
+      if (error) { showMsg('slotMsg', 'Could not cancel: ' + error.message, 'error'); return; }
+      const done = data ? data.length : 0;
+      if (done < n) {
+        showMsg('slotMsg', `Cancelled ${done} of ${n}. The rest could not be cancelled — reload and try again.`, 'error');
+      } else {
+        showMsg('slotMsg', `Cancelled ${done} slot${done === 1 ? '' : 's'}.`, 'success');
+      }
+      loadSlotAdmin(); renderCalendar(); loadBookings();
+    }
+
     async function loadSlotAdmin() {
       const { data, error } = await db.from('slots').select('*, pools(name), profiles!coach_id(display_name)')
         .gte('starts_at', new Date().toISOString())
@@ -501,22 +537,35 @@
       const el = document.getElementById('slotAdminList');
       if (error) { el.innerHTML = ''; showMsg('slotMsg', 'Could not load slots: ' + error.message, 'error'); return; }
       if (!data || !data.length) { el.innerHTML = '<p class="empty">No upcoming slots.</p>'; return; }
-      el.innerHTML = '<table><tr><th>When</th><th>Pool</th><th>Coach</th><th>Status</th><th></th></tr>' +
+      el.innerHTML =
+        '<div class="bulkbar"><button class="btn small danger" id="cancelSelected" disabled>Cancel selected</button>' +
+        '<span class="muted" id="selCount">None selected</span></div>' +
+        '<table><tr><th><input type="checkbox" id="selAll" title="Select all"></th><th>When</th><th>Pool</th><th>Coach</th><th>Status</th><th></th></tr>' +
         data.map(s => `<tr>
+          <td><input type="checkbox" class="rowSel" data-id="${s.id}" data-status="${s.status}"></td>
           <td>${fmtDT(new Date(s.starts_at))} (${s.duration_min}m)</td>
           <td>${esc(s.pools?.name || '')}</td>
           <td>${esc(s.profiles?.display_name || '—')}</td>
           <td><span class="badge ${s.status}">${s.status}</span></td>
           <td><button class="btn small danger" data-cancel="${s.id}" data-status="${s.status}">Cancel</button></td>
         </tr>`).join('') + '</table>';
-      el.querySelectorAll('[data-cancel]').forEach(b => b.onclick = async () => {
-        if (!confirm(b.dataset.status === 'booked'
-          ? 'This slot is BOOKED — cancelling removes the booking. Continue?' : 'Cancel this slot?')) return;
-        if (b.dataset.status === 'booked')
-          await db.from('bookings').update({ status: 'cancelled' }).eq('slot_id', b.dataset.cancel).eq('status','confirmed');
-        await db.from('slots').update({ status: 'cancelled' }).eq('id', b.dataset.cancel);
-        loadSlotAdmin(); renderCalendar(); loadBookings();
-      });
+
+      const rowSels = () => Array.from(el.querySelectorAll('.rowSel'));
+      const checked = () => rowSels().filter(c => c.checked);
+      const cancelBtn = el.querySelector('#cancelSelected');
+      const selCount = el.querySelector('#selCount');
+      const selAll = el.querySelector('#selAll');
+      const refresh = () => {
+        const c = checked();
+        cancelBtn.disabled = c.length === 0;
+        selCount.textContent = c.length ? `${c.length} selected` : 'None selected';
+        selAll.checked = c.length > 0 && c.length === rowSels().length;
+      };
+      selAll.onchange = () => { rowSels().forEach(c => { c.checked = selAll.checked; }); refresh(); };
+      rowSels().forEach(c => { c.onchange = refresh; });
+      cancelBtn.onclick = () => cancelSlots(checked().map(c => ({ id: c.dataset.id, status: c.dataset.status })));
+      el.querySelectorAll('[data-cancel]').forEach(b => b.onclick = () =>
+        cancelSlots([{ id: b.dataset.cancel, status: b.dataset.status }]));
     }
 
     // ================= Bookings =================

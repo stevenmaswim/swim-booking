@@ -87,6 +87,10 @@ table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
 th { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
 tr:hover td { background: #f8fafc; }
+td .rowSel, th #selAll { width: 16px; height: 16px; cursor: pointer; }
+
+/* ---- Bulk action bar (e.g. cancel several slots at once) ---- */
+.bulkbar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
 
 /* ---- Badges ---- */
 .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 700; }
