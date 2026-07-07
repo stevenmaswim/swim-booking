@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Book a Swim Lesson</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <nav>
+    <div class="container">
+      <a class="brand" href="index.html">&#127946; Swim Lessons</a>
+      <div class="nav-links"><a href="index.html">Home</a></div>
+    </div>
+  </nav>
+
+  <div class="container" style="padding-top: 28px; padding-bottom: 48px; max-width: 760px;">
+    <h1 style="margin-bottom: 4px;">Book a Lesson</h1>
+    <p class="muted" style="margin-bottom: 20px;">Pick a time below — you'll just need a name, email, and phone number.</p>
+
+    <div id="cancelPanel" class="card" style="display:none;">
+      <h3>Cancel your booking</h3>
+      <p class="muted">You followed a cancellation link. Confirm below to free up your spot.</p>
+      <div class="msg" id="cancelMsg"></div>
+      <button class="btn danger" id="cancelBtn" style="margin-top:10px;">Cancel my booking</button>
+    </div>
+
+    <div class="card">
+      <div class="week-nav">
+        <button class="btn secondary small" id="prevWeek">&larr; Prev</button>
+        <h2 id="weekLabel"></h2>
+        <button class="btn secondary small" id="nextWeek">Next &rarr;</button>
+      </div>
+      <div class="row" style="margin-bottom: 16px;">
+        <select id="poolFilter"><option value="">All pools</option></select>
+      </div>
+      <div class="msg" id="listMsg"></div>
+      <div id="slotList"><p class="empty">Loading available times…</p></div>
+    </div>
+  </div>
+
+  <!-- Booking modal -->
+  <div class="modal-backdrop" id="bookModal">
+    <div class="modal">
+      <h3>Confirm your lesson</h3>
+      <p class="muted" id="modalSlotInfo"></p>
+      <form id="bookForm">
+        <label for="fName">Student name</label>
+        <input id="fName" required minlength="2" placeholder="Full name">
+        <label for="fEmail">Email</label>
+        <input id="fEmail" type="email" required placeholder="you@example.com">
+        <label for="fPhone">Phone</label>
+        <input id="fPhone" type="tel" required minlength="7" placeholder="e.g. 604-555-1234">
+        <div class="msg" id="bookMsg"></div>
+        <div class="row" style="margin-top: 16px;">
+          <button type="button" class="btn secondary" id="closeModal">Back</button>
+          <button type="submit" class="btn" id="submitBtn">Book this slot</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Success modal -->
+  <div class="modal-backdrop" id="doneModal">
+    <div class="modal" style="text-align:center;">
+      <div style="font-size: 2.4rem;">&#127881;</div>
+      <h3>You're booked!</h3>
+      <p id="doneInfo" class="muted"></p>
+      <p class="muted" style="margin-top:10px;">Save this link in case you need to cancel:</p>
+      <input id="cancelLink" readonly style="margin-top:6px; font-size:0.8rem;" onclick="this.select()">
+      <button class="btn" style="margin-top: 16px;" onclick="location.href='book.html'">Done</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script>
+    let weekStart = startOfWeek(new Date());
+    let selectedSlot = null;
+    let pools = [];
+
+    function startOfWeek(d) {
+      const x = new Date(d); x.setHours(0, 0, 0, 0);
+      x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); // Monday
+      return x;
+    }
+    function fmtDay(d) { return d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }); }
+    function fmtTime(d) { return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+    function showMsg(id, text, type) {
+      const el = document.getElementById(id);
+      el.textContent = text; el.className = 'msg show ' + type;
+    }
+
+    async function loadPools() {
+      const { data } = await db.from('pools').select('id, name').eq('active', true).order('name');
+      pools = data || [];
+      const sel = document.getElementById('poolFilter');
+      pools.forEach(p => {
+        const o = document.createElement('option');
+        o.value = p.id; o.textContent = p.name; sel.appendChild(o);
+      });
+    }
+
+    async function loadSlots() {
+      const list = document.getElementById('slotList');
+      list.innerHTML = '<p class="empty">Loading…</p>';
+      const weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate() + 7);
+      document.getElementById('weekLabel').textContent =
+        weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' – ' +
+        new Date(weekEnd - 1).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+
+      let q = db.from('slots')
+        .select('id, starts_at, duration_min, pool_id, pools(name), profiles(display_name)')
+        .eq('status', 'open')
+        .gte('starts_at', new Date(Math.max(weekStart, Date.now())).toISOString())
+        .lt('starts_at', weekEnd.toISOString())
+        .order('starts_at');
+      const pf = document.getElementById('poolFilter').value;
+      if (pf) q = q.eq('pool_id', pf);
+
+      const { data, error } = await q;
+      if (error) { showMsg('listMsg', 'Could not load slots: ' + error.message, 'error'); return; }
+      if (!data || !data.length) {
+        list.innerHTML = '<p class="empty">No open times this week — try another week or check back soon!</p>';
+        return;
+      }
+
+      const byDay = {};
+      data.forEach(s => {
+        const key = new Date(s.starts_at).toDateString();
+        (byDay[key] = byDay[key] || []).push(s);
+      });
+
+      list.innerHTML = Object.entries(byDay).map(([day, slots]) => `
+        <div class="day-group">
+          <h3>${fmtDay(new Date(day))}</h3>
+          <div class="slot-grid">
+            ${slots.map(s => `
+              <div class="slot-chip" data-id="${s.id}">
+                <div class="time">${fmtTime(new Date(s.starts_at))} · ${s.duration_min} min</div>
+                <div class="meta">${esc(s.pools?.name || '')}${s.profiles ? ' · Coach ' + esc(s.profiles.display_name) : ''}</div>
+              </div>`).join('')}
+          </div>
+        </div>`).join('');
+
+      list.querySelectorAll('.slot-chip').forEach(chip => {
+        chip.onclick = () => openModal(data.find(s => s.id === chip.dataset.id));
+      });
+    }
+
+    function openModal(slot) {
+      selectedSlot = slot;
+      const d = new Date(slot.starts_at);
+      document.getElementById('modalSlotInfo').textContent =
+        `${fmtDay(d)} at ${fmtTime(d)} · ${slot.duration_min} min · ${slot.pools?.name || ''}` +
+        (slot.profiles ? ` · Coach ${slot.profiles.display_name}` : '');
+      document.getElementById('bookMsg').className = 'msg';
+      document.getElementById('bookModal').classList.add('show');
+    }
+
+    document.getElementById('closeModal').onclick = () =>
+      document.getElementById('bookModal').classList.remove('show');
+
+    document.getElementById('bookForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('submitBtn');
+      btn.disabled = true; btn.textContent = 'Booking…';
+      const { data, error } = await db.rpc('book_slot', {
+        p_slot_id: selectedSlot.id,
+        p_name: document.getElementById('fName').value,
+        p_email: document.getElementById('fEmail').value,
+        p_phone: document.getElementById('fPhone').value
+      });
+      btn.disabled = false; btn.textContent = 'Book this slot';
+      if (error) { showMsg('bookMsg', error.message, 'error'); loadSlots(); return; }
+
+      document.getElementById('bookModal').classList.remove('show');
+      const d = new Date(data.starts_at);
+      document.getElementById('doneInfo').textContent =
+        `${fmtDay(d)} at ${fmtTime(d)}. See you at the pool!`;
+      document.getElementById('cancelLink').value =
+        location.origin + location.pathname + '?cancel=' + data.cancel_token;
+      document.getElementById('doneModal').classList.add('show');
+    };
+
+    // Self-service cancellation via ?cancel=TOKEN
+    const cancelToken = new URLSearchParams(location.search).get('cancel');
+    if (cancelToken) {
+      document.getElementById('cancelPanel').style.display = 'block';
+      document.getElementById('cancelBtn').onclick = async () => {
+        const { error } = await db.rpc('cancel_booking', { p_token: cancelToken });
+        if (error) { showMsg('cancelMsg', error.message, 'error'); return; }
+        showMsg('cancelMsg', 'Your booking has been cancelled. The spot is open again.', 'success');
+        document.getElementById('cancelBtn').style.display = 'none';
+        loadSlots();
+      };
+    }
+
+    document.getElementById('prevWeek').onclick = () => { weekStart.setDate(weekStart.getDate() - 7); loadSlots(); };
+    document.getElementById('nextWeek').onclick = () => { weekStart.setDate(weekStart.getDate() + 7); loadSlots(); };
+    document.getElementById('poolFilter').onchange = loadSlots;
+
+    loadPools().then(loadSlots);
+  </script>
+</body>
+</html>

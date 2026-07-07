@@ -1,0 +1,170 @@
+/* ============ Swim Lessons Booking — shared styles ============ */
+:root {
+  --blue: #0369a1;
+  --blue-dark: #075985;
+  --aqua: #06b6d4;
+  --aqua-light: #cffafe;
+  --bg: #f0f9ff;
+  --card: #ffffff;
+  --text: #0f172a;
+  --muted: #64748b;
+  --border: #e2e8f0;
+  --green: #059669;
+  --red: #dc2626;
+  --radius: 12px;
+  --shadow: 0 1px 3px rgba(2, 44, 74, 0.08), 0 4px 16px rgba(2, 44, 74, 0.06);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.55;
+}
+a { color: var(--blue); }
+
+.container { max-width: 1100px; margin: 0 auto; padding: 0 20px; }
+
+/* ---- Nav ---- */
+nav {
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 50;
+}
+nav .container { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+.brand { font-weight: 800; font-size: 1.15rem; color: var(--blue-dark); text-decoration: none; display: flex; align-items: center; gap: 8px; }
+.nav-links { display: flex; gap: 18px; align-items: center; }
+.nav-links a { text-decoration: none; color: var(--muted); font-weight: 500; font-size: 0.95rem; }
+.nav-links a:hover { color: var(--blue); }
+
+/* ---- Buttons ---- */
+.btn {
+  display: inline-block; border: none; cursor: pointer;
+  background: var(--blue); color: #fff;
+  padding: 10px 20px; border-radius: 8px;
+  font-size: 0.95rem; font-weight: 600; text-decoration: none;
+  transition: background 0.15s;
+}
+.btn:hover { background: var(--blue-dark); }
+.btn.secondary { background: var(--aqua-light); color: var(--blue-dark); }
+.btn.secondary:hover { background: #a5f3fc; }
+.btn.danger { background: #fee2e2; color: var(--red); }
+.btn.danger:hover { background: #fecaca; }
+.btn.small { padding: 6px 12px; font-size: 0.85rem; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ---- Cards / forms ---- */
+.card {
+  background: var(--card); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 24px; margin-bottom: 20px;
+}
+label { display: block; font-weight: 600; font-size: 0.88rem; margin: 12px 0 4px; }
+input, select, textarea {
+  width: 100%; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: 8px; font-size: 0.95rem; font-family: inherit; background: #fff;
+}
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--aqua); border-color: transparent; }
+.row { display: flex; gap: 12px; flex-wrap: wrap; }
+.row > * { flex: 1; min-width: 130px; }
+
+/* ---- Feedback ---- */
+.msg { padding: 12px 16px; border-radius: 8px; margin: 12px 0; font-size: 0.92rem; display: none; }
+.msg.show { display: block; }
+.msg.error { background: #fee2e2; color: #991b1b; }
+.msg.success { background: #d1fae5; color: #065f46; }
+
+/* ---- Tables ---- */
+table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+tr:hover td { background: #f8fafc; }
+
+/* ---- Badges ---- */
+.badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 700; }
+.badge.open { background: #d1fae5; color: #065f46; }
+.badge.booked { background: #dbeafe; color: #1e40af; }
+.badge.cancelled { background: #f1f5f9; color: var(--muted); }
+
+/* ---- Modal ---- */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(15, 23, 42, 0.5);
+  display: none; align-items: center; justify-content: center; z-index: 100; padding: 20px;
+}
+.modal-backdrop.show { display: flex; }
+.modal { background: #fff; border-radius: var(--radius); padding: 28px; max-width: 440px; width: 100%; max-height: 90vh; overflow-y: auto; }
+.modal h3 { margin-bottom: 4px; }
+
+/* ---- Week navigation ---- */
+.week-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.week-nav h2 { font-size: 1.1rem; }
+
+/* ---- Slot chips (customer view) ---- */
+.day-group { margin-bottom: 22px; }
+.day-group h3 { font-size: 0.95rem; color: var(--blue-dark); margin-bottom: 10px; }
+.slot-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+.slot-chip {
+  background: var(--card); border: 1.5px solid var(--aqua);
+  border-radius: 10px; padding: 10px 14px; cursor: pointer;
+  font-size: 0.88rem; box-shadow: var(--shadow); transition: transform 0.1s;
+}
+.slot-chip:hover { transform: translateY(-2px); background: var(--aqua-light); }
+.slot-chip .time { font-weight: 700; color: var(--blue-dark); }
+.slot-chip .meta { color: var(--muted); font-size: 0.8rem; }
+
+/* ---- Staff calendar ---- */
+.cal-wrap { overflow-x: auto; }
+.cal {
+  display: grid; grid-template-columns: 52px repeat(7, minmax(120px, 1fr));
+  border: 1px solid var(--border); border-radius: 8px; background: #fff; min-width: 900px;
+}
+.cal .head {
+  padding: 8px 6px; font-size: 0.8rem; font-weight: 700; text-align: center;
+  border-bottom: 2px solid var(--border); background: #f8fafc; position: sticky; top: 0;
+}
+.cal .head.today { color: var(--blue); }
+.cal .time-col { font-size: 0.7rem; color: var(--muted); text-align: right; padding-right: 6px; border-right: 1px solid var(--border); }
+.cal .day-col { position: relative; border-right: 1px solid #f1f5f9; }
+.cal .hour-line { height: 48px; border-bottom: 1px solid #f1f5f9; }
+.cal-block {
+  position: absolute; left: 3px; right: 3px; border-radius: 6px;
+  font-size: 0.7rem; padding: 3px 6px; overflow: hidden; cursor: default;
+  border-left: 3px solid;
+}
+.cal-block.slot-open { background: #d1fae5; border-color: var(--green); color: #065f46; cursor: pointer; }
+.cal-block.slot-booked { background: #dbeafe; border-color: #2563eb; color: #1e40af; cursor: pointer; }
+
+/* ---- Tabs ---- */
+.tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--border); margin-bottom: 20px; flex-wrap: wrap; }
+.tabs button {
+  background: none; border: none; padding: 10px 16px; cursor: pointer;
+  font-size: 0.92rem; font-weight: 600; color: var(--muted);
+  border-bottom: 2px solid transparent; margin-bottom: -2px;
+}
+.tabs button.active { color: var(--blue); border-bottom-color: var(--blue); }
+
+/* ---- Hero (landing) ---- */
+.hero {
+  background: linear-gradient(135deg, var(--blue-dark), var(--aqua));
+  color: #fff; padding: 80px 0 90px; text-align: center;
+}
+.hero h1 { font-size: 2.6rem; margin-bottom: 12px; }
+.hero p { font-size: 1.15rem; opacity: 0.92; max-width: 560px; margin: 0 auto 28px; }
+.section { padding: 56px 0; }
+.section h2 { text-align: center; margin-bottom: 28px; color: var(--blue-dark); }
+.coach-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 20px; }
+.coach-card { text-align: center; }
+.coach-avatar {
+  width: 72px; height: 72px; border-radius: 50%; margin: 0 auto 12px;
+  background: var(--aqua-light); color: var(--blue-dark);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.6rem; font-weight: 800;
+}
+footer { text-align: center; color: var(--muted); font-size: 0.85rem; padding: 32px 0; }
+
+.muted { color: var(--muted); font-size: 0.88rem; }
+.empty { text-align: center; color: var(--muted); padding: 32px; }
+
+@media (max-width: 640px) {
+  .hero h1 { font-size: 1.9rem; }
+  .nav-links { gap: 10px; font-size: 0.85rem; }
+}

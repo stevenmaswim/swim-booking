@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Staff — Swim Lessons</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <nav>
+    <div class="container">
+      <a class="brand" href="index.html">&#127946; Swim Lessons <span class="muted" style="font-weight:500;">Staff</span></a>
+      <div class="nav-links">
+        <span id="whoami" class="muted"></span>
+        <button class="btn small danger" id="logoutBtn" style="display:none;">Log out</button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ============ LOGIN ============ -->
+  <div class="container" id="loginView" style="max-width: 420px; padding-top: 60px; display:none;">
+    <div class="card">
+      <h2 style="margin-bottom:4px;">Staff login</h2>
+      <p class="muted">Accounts are created by an admin in Supabase.</p>
+      <form id="loginForm">
+        <label for="lEmail">Email</label>
+        <input id="lEmail" type="email" required>
+        <label for="lPass">Password</label>
+        <input id="lPass" type="password" required>
+        <div class="msg" id="loginMsg"></div>
+        <button class="btn" style="margin-top: 16px; width: 100%;">Sign in</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============ DASHBOARD ============ -->
+  <div class="container" id="dashView" style="padding-top: 24px; padding-bottom: 60px; display:none;">
+    <div class="tabs">
+      <button data-tab="calendar" class="active">&#128197; Calendar</button>
+      <button data-tab="avail">&#9200; My Availability</button>
+      <button data-tab="slots">&#10133; Publish Slots</button>
+      <button data-tab="bookings">&#128203; Bookings</button>
+      <button data-tab="pools">&#128205; Pools</button>
+      <button data-tab="me">&#128100; My Profile</button>
+    </div>
+
+    <!-- Calendar tab -->
+    <div id="tab-calendar">
+      <div class="week-nav">
+        <button class="btn secondary small" id="calPrev">&larr; Prev</button>
+        <h2 id="calLabel"></h2>
+        <button class="btn secondary small" id="calNext">Next &rarr;</button>
+      </div>
+      <div id="calLegend" style="margin-bottom: 10px;"></div>
+      <p class="muted" style="margin-bottom:10px;">Shaded blocks = coach availability. <span class="badge open">Green</span> = open slot, <span class="badge booked">Blue</span> = booked slot. Click a slot for details.</p>
+      <div class="cal-wrap"><div class="cal" id="calGrid"></div></div>
+    </div>
+
+    <!-- Availability tab -->
+    <div id="tab-avail" style="display:none;">
+      <div class="card">
+        <h3>Add availability</h3>
+        <p class="muted">Mark when you can teach — it shows on the team calendar so slots get planned around real availability.</p>
+        <form id="availForm">
+          <div class="row">
+            <div><label>Date</label><input type="date" id="avDate" required></div>
+            <div><label>From</label><input type="time" id="avStart" required value="16:00"></div>
+            <div><label>To</label><input type="time" id="avEnd" required value="20:00"></div>
+            <div><label>Pool (optional)</label><select id="avPool"><option value="">Any pool</option></select></div>
+          </div>
+          <label>Note (optional)</label>
+          <input id="avNote" placeholder="e.g. prefer kids' lessons">
+          <div class="msg" id="availMsg"></div>
+          <button class="btn" style="margin-top:14px;">Add availability</button>
+        </form>
+      </div>
+      <div class="card">
+        <h3>My upcoming availability</h3>
+        <div id="availList"><p class="empty">Loading…</p></div>
+      </div>
+    </div>
+
+    <!-- Publish slots tab -->
+    <div id="tab-slots" style="display:none;">
+      <div class="card">
+        <h3>Publish bookable slots</h3>
+        <p class="muted">Creates back-to-back slots customers can book. Example: 4 slots &times; 30 min from 4:00 PM = 4:00, 4:30, 5:00, 5:30.</p>
+        <form id="slotForm">
+          <div class="row">
+            <div><label>Date</label><input type="date" id="slDate" required></div>
+            <div><label>First slot starts</label><input type="time" id="slStart" required value="16:00"></div>
+            <div><label>Slot length (min)</label><select id="slDur">
+              <option>30</option><option>45</option><option selected>60</option><option>90</option>
+            </select></div>
+            <div><label># of slots</label><input type="number" id="slCount" min="1" max="20" value="1" required></div>
+          </div>
+          <div class="row">
+            <div><label>Pool</label><select id="slPool" required></select></div>
+            <div><label>Coach</label><select id="slCoach"><option value="">Unassigned</option></select></div>
+          </div>
+          <div class="msg" id="slotMsg"></div>
+          <button class="btn" style="margin-top:14px;">Publish slots</button>
+        </form>
+      </div>
+      <div class="card">
+        <h3>Upcoming slots</h3>
+        <div id="slotAdminList"><p class="empty">Loading…</p></div>
+      </div>
+    </div>
+
+    <!-- Bookings tab -->
+    <div id="tab-bookings" style="display:none;">
+      <div class="card">
+        <h3>Upcoming bookings</h3>
+        <div class="msg" id="bookingsMsg"></div>
+        <div style="overflow-x:auto;"><div id="bookingsList"><p class="empty">Loading…</p></div></div>
+      </div>
+    </div>
+
+    <!-- Pools tab -->
+    <div id="tab-pools" style="display:none;">
+      <div class="card">
+        <h3>Add a pool</h3>
+        <form id="poolForm">
+          <div class="row">
+            <div><label>Name</label><input id="pName" required placeholder="e.g. Kits Pool"></div>
+            <div><label>Address</label><input id="pAddr" placeholder="Street address"></div>
+          </div>
+          <label>Notes</label>
+          <input id="pNotes" placeholder="e.g. bring your own lane rope">
+          <div class="msg" id="poolMsg"></div>
+          <button class="btn" style="margin-top:14px;">Add pool</button>
+        </form>
+      </div>
+      <div class="card">
+        <h3>Pools</h3>
+        <div id="poolList"><p class="empty">Loading…</p></div>
+      </div>
+    </div>
+
+    <!-- Profile tab -->
+    <div id="tab-me" style="display:none;">
+      <div class="card" style="max-width: 520px;">
+        <h3>My coach profile</h3>
+        <p class="muted">Shown on the public "About the Coaches" page if visible.</p>
+        <form id="meForm">
+          <label>Display name</label>
+          <input id="meName" required>
+          <label>Bio</label>
+          <textarea id="meBio" rows="4" placeholder="A couple of sentences about you"></textarea>
+          <label style="display:flex; align-items:center; gap:8px; margin-top:12px;">
+            <input type="checkbox" id="mePublic" style="width:auto;"> Show me on the public site
+          </label>
+          <div class="msg" id="meMsg"></div>
+          <button class="btn" style="margin-top:14px;">Save profile</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slot detail modal -->
+  <div class="modal-backdrop" id="slotModal">
+    <div class="modal">
+      <h3 id="smTitle"></h3>
+      <p class="muted" id="smInfo"></p>
+      <div id="smBooking"></div>
+      <div class="row" style="margin-top: 18px;">
+        <button class="btn secondary" onclick="document.getElementById('slotModal').classList.remove('show')">Close</button>
+        <button class="btn danger" id="smDelete">Cancel slot</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script>
+    // ================= State =================
+    let me = null, myProfile = null;
+    let pools = [], coaches = [];
+    let calStart = startOfWeek(new Date());
+    const COLORS = ['#0ea5e9','#8b5cf6','#f59e0b','#10b981','#ef4444','#ec4899','#14b8a6','#f97316'];
+    const DAY_START = 6, DAY_END = 22, HOUR_PX = 48;
+
+    function startOfWeek(d) {
+      const x = new Date(d); x.setHours(0,0,0,0);
+      x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+      return x;
+    }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+    function fmtTime(d) { return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); }
+    function fmtDT(d) { return d.toLocaleDateString(undefined, { weekday:'short', month:'short', day:'numeric' }) + ' ' + fmtTime(d); }
+    function showMsg(id, text, type) {
+      const el = document.getElementById(id);
+      el.textContent = text; el.className = 'msg show ' + type;
+      if (type === 'success') setTimeout(() => el.className = 'msg', 3500);
+    }
+    function coachColor(id) {
+      const i = coaches.findIndex(c => c.id === id);
+      return COLORS[(i < 0 ? 0 : i) % COLORS.length];
+    }
+    function localISO(dateStr, timeStr) { return new Date(dateStr + 'T' + timeStr).toISOString(); }
+
+    // ================= Auth =================
+    async function init() {
+      const { data: { session } } = await db.auth.getSession();
+      if (session) enterDash(session.user); else showLogin();
+    }
+    function showLogin() {
+      document.getElementById('loginView').style.display = 'block';
+      document.getElementById('dashView').style.display = 'none';
+      document.getElementById('logoutBtn').style.display = 'none';
+      document.getElementById('whoami').textContent = '';
+    }
+    async function enterDash(user) {
+      me = user;
+      document.getElementById('loginView').style.display = 'none';
+      document.getElementById('dashView').style.display = 'block';
+      document.getElementById('logoutBtn').style.display = 'inline-block';
+      await loadBaseData();
+      document.getElementById('whoami').textContent = myProfile ? myProfile.display_name : user.email;
+      renderCalendar();
+      loadAvail(); loadSlotAdmin(); loadBookings(); loadPoolAdmin(); fillProfileForm();
+    }
+    document.getElementById('loginForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const { data, error } = await db.auth.signInWithPassword({
+        email: document.getElementById('lEmail').value,
+        password: document.getElementById('lPass').value
+      });
+      if (error) { showMsg('loginMsg', error.message, 'error'); return; }
+      enterDash(data.user);
+    };
+    document.getElementById('logoutBtn').onclick = async () => { await db.auth.signOut(); showLogin(); };
+
+    // ================= Base data =================
+    async function loadBaseData() {
+      const [p, c] = await Promise.all([
+        db.from('pools').select('*').order('name'),
+        db.from('profiles').select('*').order('display_name')
+      ]);
+      pools = p.data || []; coaches = c.data || [];
+      myProfile = coaches.find(x => x.id === me.id) || null;
+
+      const activePools = pools.filter(x => x.active);
+      for (const [selId, includeEmpty, emptyLabel] of [
+        ['avPool', true, 'Any pool'], ['slPool', false, ''], ]) {
+        const sel = document.getElementById(selId);
+        sel.innerHTML = includeEmpty ? `<option value="">${emptyLabel}</option>` : '';
+        activePools.forEach(x => sel.insertAdjacentHTML('beforeend',
+          `<option value="${x.id}">${esc(x.name)}</option>`));
+      }
+      const cs = document.getElementById('slCoach');
+      cs.innerHTML = '<option value="">Unassigned</option>';
+      coaches.forEach(x => cs.insertAdjacentHTML('beforeend',
+        `<option value="${x.id}" ${x.id === me.id ? 'selected' : ''}>${esc(x.display_name)}</option>`));
+    }
+
+    // ================= Tabs =================
+    document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+      document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      ['calendar','avail','slots','bookings','pools','me'].forEach(t =>
+        document.getElementById('tab-' + t).style.display = (t === b.dataset.tab) ? 'block' : 'none');
+    });
+
+    // ================= Calendar =================
+    async function renderCalendar() {
+      const end = new Date(calStart); end.setDate(end.getDate() + 7);
+      document.getElementById('calLabel').textContent =
+        calStart.toLocaleDateString(undefined, { month:'short', day:'numeric' }) + ' – ' +
+        new Date(end - 1).toLocaleDateString(undefined, { month:'short', day:'numeric', year:'numeric' });
+
+      const [av, sl] = await Promise.all([
+        db.from('availability').select('*, profiles(display_name), pools(name)')
+          .gte('day', calStart.toISOString().slice(0,10)).lt('day', end.toISOString().slice(0,10)),
+        db.from('slots').select('*, profiles(display_name), pools(name)')
+          .gte('starts_at', calStart.toISOString()).lt('starts_at', end.toISOString())
+          .neq('status', 'cancelled')
+      ]);
+
+      document.getElementById('calLegend').innerHTML = coaches.map(c =>
+        `<span style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;font-size:0.82rem;">
+          <span style="width:11px;height:11px;border-radius:3px;background:${coachColor(c.id)};display:inline-block;"></span>
+          ${esc(c.display_name)}</span>`).join('');
+
+      const grid = document.getElementById('calGrid');
+      let html = '<div class="head"></div>';
+      const days = [];
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(calStart); d.setDate(d.getDate() + i); days.push(d);
+        const isToday = d.toDateString() === new Date().toDateString();
+        html += `<div class="head ${isToday ? 'today' : ''}">${d.toLocaleDateString(undefined,{weekday:'short'})}<br>${d.getDate()}</div>`;
+      }
+      html += '<div class="time-col">' +
+        Array.from({length: DAY_END - DAY_START}, (_, h) =>
+          `<div class="hour-line">${(DAY_START + h) % 12 || 12}${DAY_START + h < 12 ? 'a' : 'p'}</div>`).join('') + '</div>';
+
+      days.forEach((d, i) => {
+        html += `<div class="day-col" data-day="${i}">` +
+          Array.from({length: DAY_END - DAY_START}, () => '<div class="hour-line"></div>').join('') + '</div>';
+      });
+      grid.innerHTML = html;
+
+      function place(dayIdx, startMin, endMin, cls, style, text, title, onclick) {
+        const col = grid.querySelector(`.day-col[data-day="${dayIdx}"]`);
+        if (!col) return;
+        const top = Math.max(0, (startMin - DAY_START * 60) / 60 * HOUR_PX);
+        const h = Math.max(14, (endMin - startMin) / 60 * HOUR_PX - 2);
+        const el = document.createElement('div');
+        el.className = 'cal-block ' + cls;
+        el.style.cssText = `top:${top}px;height:${h}px;${style}`;
+        el.innerHTML = text; el.title = title;
+        if (onclick) el.onclick = onclick;
+        col.appendChild(el);
+      }
+
+      (av.data || []).forEach(a => {
+        const dayIdx = Math.round((new Date(a.day + 'T00:00') - calStart) / 86400000);
+        const [sh, sm] = a.start_time.split(':').map(Number);
+        const [eh, em] = a.end_time.split(':').map(Number);
+        const color = coachColor(a.coach_id);
+        place(dayIdx, sh * 60 + sm, eh * 60 + em, '',
+          `background:${color}22;border-color:${color};color:#334155;z-index:1;`,
+          esc(a.profiles?.display_name || '') + (a.pools ? '<br>' + esc(a.pools.name) : ''),
+          `${a.profiles?.display_name} available ${a.start_time.slice(0,5)}–${a.end_time.slice(0,5)}` +
+          (a.pools ? ' @ ' + a.pools.name : '') + (a.note ? ' — ' + a.note : ''));
+      });
+
+      (sl.data || []).forEach(s => {
+        const st = new Date(s.starts_at);
+        const dayIdx = Math.floor((st - calStart) / 86400000);
+        const startMin = st.getHours() * 60 + st.getMinutes();
+        place(dayIdx, startMin, startMin + s.duration_min,
+          s.status === 'open' ? 'slot-open' : 'slot-booked',
+          'left:40%;z-index:2;',
+          `${fmtTime(st)}<br>${esc(s.pools?.name || '')}`,
+          `${s.status.toUpperCase()} — ${fmtTime(st)} ${s.pools?.name || ''}` +
+          (s.profiles ? ' · ' + s.profiles.display_name : ''),
+          () => openSlotModal(s));
+      });
+    }
+    document.getElementById('calPrev').onclick = () => { calStart.setDate(calStart.getDate() - 7); renderCalendar(); };
+    document.getElementById('calNext').onclick = () => { calStart.setDate(calStart.getDate() + 7); renderCalendar(); };
+
+    // ================= Slot detail modal =================
+    async function openSlotModal(s) {
+      const st = new Date(s.starts_at);
+      document.getElementById('smTitle').textContent = (s.status === 'open' ? 'Open slot' : 'Booked slot');
+      document.getElementById('smInfo').textContent =
+        `${fmtDT(st)} · ${s.duration_min} min · ${s.pools?.name || ''}` +
+        (s.profiles ? ` · Coach ${s.profiles.display_name}` : '');
+      const bEl = document.getElementById('smBooking');
+      bEl.innerHTML = '';
+      if (s.status === 'booked') {
+        const { data } = await db.from('bookings').select('*')
+          .eq('slot_id', s.id).eq('status', 'confirmed').maybeSingle();
+        if (data) bEl.innerHTML = `
+          <div class="card" style="margin-top:12px; padding:14px; background:#f8fafc; box-shadow:none;">
+            <strong>${esc(data.student_name)}</strong><br>
+            <span class="muted">&#9993; ${esc(data.email)}<br>&#128222; ${esc(data.phone)}</span>
+          </div>`;
+      }
+      document.getElementById('smDelete').onclick = async () => {
+        if (!confirm(s.status === 'booked'
+          ? 'This slot is BOOKED. Cancelling removes the booking too. Continue?'
+          : 'Cancel this open slot?')) return;
+        if (s.status === 'booked')
+          await db.from('bookings').update({ status: 'cancelled' }).eq('slot_id', s.id).eq('status','confirmed');
+        await db.from('slots').update({ status: 'cancelled' }).eq('id', s.id);
+        document.getElementById('slotModal').classList.remove('show');
+        renderCalendar(); loadSlotAdmin(); loadBookings();
+      };
+      document.getElementById('slotModal').classList.add('show');
+    }
+
+    // ================= Availability =================
+    document.getElementById('availForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const { error } = await db.from('availability').insert({
+        coach_id: me.id,
+        day: document.getElementById('avDate').value,
+        start_time: document.getElementById('avStart').value,
+        end_time: document.getElementById('avEnd').value,
+        pool_id: document.getElementById('avPool').value || null,
+        note: document.getElementById('avNote').value
+      });
+      if (error) { showMsg('availMsg', error.message, 'error'); return; }
+      showMsg('availMsg', 'Availability added.', 'success');
+      loadAvail(); renderCalendar();
+    };
+    async function loadAvail() {
+      const { data } = await db.from('availability').select('*, pools(name)')
+        .eq('coach_id', me.id)
+        .gte('day', new Date().toISOString().slice(0,10))
+        .order('day').order('start_time');
+      const el = document.getElementById('availList');
+      if (!data || !data.length) { el.innerHTML = '<p class="empty">Nothing scheduled yet.</p>'; return; }
+      el.innerHTML = '<table><tr><th>Date</th><th>Time</th><th>Pool</th><th>Note</th><th></th></tr>' +
+        data.map(a => `<tr>
+          <td>${new Date(a.day + 'T00:00').toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})}</td>
+          <td>${a.start_time.slice(0,5)}–${a.end_time.slice(0,5)}</td>
+          <td>${esc(a.pools?.name || 'Any')}</td>
+          <td>${esc(a.note)}</td>
+          <td><button class="btn small danger" data-del="${a.id}">Remove</button></td>
+        </tr>`).join('') + '</table>';
+      el.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+        await db.from('availability').delete().eq('id', b.dataset.del);
+        loadAvail(); renderCalendar();
+      });
+    }
+
+    // ================= Publish slots =================
+    document.getElementById('slotForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const date = document.getElementById('slDate').value;
+      const start = document.getElementById('slStart').value;
+      const dur = parseInt(document.getElementById('slDur').value);
+      const count = parseInt(document.getElementById('slCount').value);
+      const rows = [];
+      for (let i = 0; i < count; i++) {
+        const t = new Date(date + 'T' + start);
+        t.setMinutes(t.getMinutes() + i * dur);
+        rows.push({
+          pool_id: document.getElementById('slPool').value,
+          coach_id: document.getElementById('slCoach').value || null,
+          starts_at: t.toISOString(),
+          duration_min: dur,
+          created_by: me.id
+        });
+      }
+      const { error } = await db.from('slots').insert(rows);
+      if (error) { showMsg('slotMsg', error.message, 'error'); return; }
+      showMsg('slotMsg', `Published ${count} slot${count > 1 ? 's' : ''}.`, 'success');
+      loadSlotAdmin(); renderCalendar();
+    };
+    async function loadSlotAdmin() {
+      const { data } = await db.from('slots').select('*, pools(name), profiles(display_name)')
+        .gte('starts_at', new Date().toISOString())
+        .neq('status', 'cancelled')
+        .order('starts_at').limit(100);
+      const el = document.getElementById('slotAdminList');
+      if (!data || !data.length) { el.innerHTML = '<p class="empty">No upcoming slots.</p>'; return; }
+      el.innerHTML = '<table><tr><th>When</th><th>Pool</th><th>Coach</th><th>Status</th><th></th></tr>' +
+        data.map(s => `<tr>
+          <td>${fmtDT(new Date(s.starts_at))} (${s.duration_min}m)</td>
+          <td>${esc(s.pools?.name || '')}</td>
+          <td>${esc(s.profiles?.display_name || '—')}</td>
+          <td><span class="badge ${s.status}">${s.status}</span></td>
+          <td><button class="btn small danger" data-cancel="${s.id}" data-status="${s.status}">Cancel</button></td>
+        </tr>`).join('') + '</table>';
+      el.querySelectorAll('[data-cancel]').forEach(b => b.onclick = async () => {
+        if (!confirm(b.dataset.status === 'booked'
+          ? 'This slot is BOOKED — cancelling removes the booking. Continue?' : 'Cancel this slot?')) return;
+        if (b.dataset.status === 'booked')
+          await db.from('bookings').update({ status: 'cancelled' }).eq('slot_id', b.dataset.cancel).eq('status','confirmed');
+        await db.from('slots').update({ status: 'cancelled' }).eq('id', b.dataset.cancel);
+        loadSlotAdmin(); renderCalendar(); loadBookings();
+      });
+    }
+
+    // ================= Bookings =================
+    async function loadBookings() {
+      const { data, error } = await db.from('bookings')
+        .select('*, slots!inner(starts_at, duration_min, pools(name), profiles(display_name))')
+        .eq('status', 'confirmed')
+        .gte('slots.starts_at', new Date().toISOString())
+        .order('created_at', { ascending: false }).limit(200);
+      const el = document.getElementById('bookingsList');
+      if (error) { showMsg('bookingsMsg', error.message, 'error'); return; }
+      if (!data || !data.length) { el.innerHTML = '<p class="empty">No upcoming bookings yet.</p>'; return; }
+      data.sort((a, b) => new Date(a.slots.starts_at) - new Date(b.slots.starts_at));
+      el.innerHTML = '<table><tr><th>Lesson</th><th>Pool</th><th>Coach</th><th>Student</th><th>Email</th><th>Phone</th><th></th></tr>' +
+        data.map(b => `<tr>
+          <td>${fmtDT(new Date(b.slots.starts_at))}</td>
+          <td>${esc(b.slots.pools?.name || '')}</td>
+          <td>${esc(b.slots.profiles?.display_name || '—')}</td>
+          <td>${esc(b.student_name)}</td>
+          <td><a href="mailto:${esc(b.email)}">${esc(b.email)}</a></td>
+          <td><a href="tel:${esc(b.phone)}">${esc(b.phone)}</a></td>
+          <td><button class="btn small danger" data-bcancel="${b.id}" data-slot="${b.slot_id}">Cancel</button></td>
+        </tr>`).join('') + '</table>';
+      el.querySelectorAll('[data-bcancel]').forEach(btn => btn.onclick = async () => {
+        if (!confirm('Cancel this booking and reopen the slot?')) return;
+        await db.from('bookings').update({ status: 'cancelled' }).eq('id', btn.dataset.bcancel);
+        await db.from('slots').update({ status: 'open' }).eq('id', btn.dataset.slot);
+        loadBookings(); loadSlotAdmin(); renderCalendar();
+      });
+    }
+
+    // ================= Pools =================
+    document.getElementById('poolForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const { error } = await db.from('pools').insert({
+        name: document.getElementById('pName').value,
+        address: document.getElementById('pAddr').value,
+        notes: document.getElementById('pNotes').value
+      });
+      if (error) { showMsg('poolMsg', error.message, 'error'); return; }
+      showMsg('poolMsg', 'Pool added.', 'success');
+      document.getElementById('poolForm').reset();
+      await loadBaseData(); loadPoolAdmin();
+    };
+    async function loadPoolAdmin() {
+      const el = document.getElementById('poolList');
+      if (!pools.length) { el.innerHTML = '<p class="empty">No pools yet — add your first one above.</p>'; return; }
+      el.innerHTML = '<table><tr><th>Name</th><th>Address</th><th>Status</th><th></th></tr>' +
+        pools.map(p => `<tr>
+          <td><strong>${esc(p.name)}</strong></td>
+          <td>${esc(p.address)}</td>
+          <td><span class="badge ${p.active ? 'open' : 'cancelled'}">${p.active ? 'active' : 'inactive'}</span></td>
+          <td><button class="btn small secondary" data-toggle="${p.id}" data-active="${p.active}">
+            ${p.active ? 'Deactivate' : 'Reactivate'}</button></td>
+        </tr>`).join('') + '</table>';
+      el.querySelectorAll('[data-toggle]').forEach(b => b.onclick = async () => {
+        await db.from('pools').update({ active: b.dataset.active !== 'true' }).eq('id', b.dataset.toggle);
+        await loadBaseData(); loadPoolAdmin();
+      });
+    }
+
+    // ================= Profile =================
+    function fillProfileForm() {
+      if (!myProfile) return;
+      document.getElementById('meName').value = myProfile.display_name;
+      document.getElementById('meBio').value = myProfile.bio;
+      document.getElementById('mePublic').checked = myProfile.is_public;
+    }
+    document.getElementById('meForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const { error } = await db.from('profiles').update({
+        display_name: document.getElementById('meName').value,
+        bio: document.getElementById('meBio').value,
+        is_public: document.getElementById('mePublic').checked
+      }).eq('id', me.id);
+      if (error) { showMsg('meMsg', error.message, 'error'); return; }
+      showMsg('meMsg', 'Profile saved.', 'success');
+      await loadBaseData();
+      document.getElementById('whoami').textContent = myProfile.display_name;
+    };
+
+    init();
+  </script>
+</body>
+</html>

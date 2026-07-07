@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Swim Lessons</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <nav>
+    <div class="container">
+      <a class="brand" href="index.html">&#127946; Swim Lessons</a>
+      <div class="nav-links">
+        <a href="#coaches">Coaches</a>
+        <a href="staff.html">Staff</a>
+        <a class="btn small" href="book.html">Book a Lesson</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="hero">
+    <div class="container">
+      <h1>Learn to Swim with Confidence</h1>
+      <p>Private lessons with experienced coaches at pools across the city. Book your weekly spot in under a minute — no account needed.</p>
+      <a class="btn secondary" href="book.html">See Available Times &rarr;</a>
+    </div>
+  </div>
+
+  <div class="section container" id="coaches">
+    <h2>About the Coaches</h2>
+    <div class="coach-grid" id="coachGrid">
+      <p class="empty">Loading coaches…</p>
+    </div>
+  </div>
+
+  <div class="section container" id="pools">
+    <h2>Where We Teach</h2>
+    <div class="coach-grid" id="poolGrid">
+      <p class="empty">Loading locations…</p>
+    </div>
+  </div>
+
+  <footer>
+    <div class="container">Questions? Reach out through our WeChat group or book directly online.</div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script>
+    async function load() {
+      const [coaches, pools] = await Promise.all([
+        db.from('profiles').select('display_name, bio').eq('is_public', true),
+        db.from('pools').select('name, address, notes').eq('active', true)
+      ]);
+
+      const cg = document.getElementById('coachGrid');
+      if (coaches.data && coaches.data.length) {
+        cg.innerHTML = coaches.data.map(c => `
+          <div class="card coach-card">
+            <div class="coach-avatar">${c.display_name.charAt(0).toUpperCase()}</div>
+            <h3>${esc(c.display_name)}</h3>
+            <p class="muted">${esc(c.bio) || 'Swim coach'}</p>
+          </div>`).join('');
+      } else {
+        cg.innerHTML = '<p class="empty">Coach bios coming soon.</p>';
+      }
+
+      const pg = document.getElementById('poolGrid');
+      if (pools.data && pools.data.length) {
+        pg.innerHTML = pools.data.map(p => `
+          <div class="card coach-card">
+            <div class="coach-avatar">&#128205;</div>
+            <h3>${esc(p.name)}</h3>
+            <p class="muted">${esc(p.address)}</p>
+            ${p.notes ? `<p class="muted">${esc(p.notes)}</p>` : ''}
+          </div>`).join('');
+      } else {
+        pg.innerHTML = '<p class="empty">Locations coming soon.</p>';
+      }
+    }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+    load();
+  </script>
+</body>
+</html>
