@@ -36,6 +36,9 @@ nav .container { display: flex; align-items: center; justify-content: space-betw
 .nav-links { display: flex; gap: 18px; align-items: center; }
 .nav-links a { text-decoration: none; color: var(--muted); font-weight: 500; font-size: 0.95rem; }
 .nav-links a:hover { color: var(--blue); }
+/* .nav-links a would otherwise repaint button text grey */
+.nav-links a.btn, .nav-links a.btn:hover { color: #fff; }
+.nav-links a.btn.secondary, .nav-links a.btn.secondary:hover { color: var(--blue-dark); }
 
 /* ---- Buttons ---- */
 .btn {
@@ -137,6 +140,10 @@ td .rowSel, th #selAll { width: 16px; height: 16px; cursor: pointer; }
 }
 .bcal-bucket:first-of-type { margin-top: 0; }
 .bcal-slot { display: block; width: 100%; margin-bottom: 8px; padding: 8px 10px; }
+.bcal-slot.is-booked {
+  opacity: 0.55; filter: grayscale(70%); pointer-events: none;
+  border-style: dashed; box-shadow: none;
+}
 .bcal-none { color: var(--muted); font-size: 0.8rem; text-align: center; padding: 14px 0; }
 @media (max-width: 720px) {
   /* Phones: stack day by day, hide empty days */
@@ -209,6 +216,13 @@ td .rowSel, th #selAll { width: 16px; height: 16px; cursor: pointer; }
   display: flex; align-items: center; justify-content: center;
   font-size: 1.6rem; font-weight: 800;
 }
+.coach-photo {
+  width: 72px; height: 72px; border-radius: 50%; margin: 0 auto 12px;
+  object-fit: cover; display: block;
+}
+.pool-photo { width: 100%; height: 140px; object-fit: cover; border-radius: 8px; margin-bottom: 12px; }
+.pool-thumb { width: 56px; height: 40px; object-fit: cover; border-radius: 6px; display: block; }
+.avatar-preview { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; }
 footer { text-align: center; color: var(--muted); font-size: 0.85rem; padding: 32px 0; }
 
 .muted { color: var(--muted); font-size: 0.88rem; }

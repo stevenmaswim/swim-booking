@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Book a Swim Lesson</title>
+  <title>Book a Lesson — KSJ Swimming</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <nav>
     <div class="container">
-      <a class="brand" href="index.html">&#127946; Swim Lessons</a>
+      <a class="brand" href="index.html">&#127946; KSJ Swimming</a>
       <div class="nav-links"><a href="index.html">Home</a></div>
     </div>
   </nav>
@@ -46,6 +46,7 @@
   <!-- Booking modal -->
   <div class="modal-backdrop" id="bookModal">
     <div class="modal">
+      <img id="modalCoachPhoto" alt="" style="display:none; width:56px; height:56px; border-radius:50%; object-fit:cover; float:right; margin-left:10px;">
       <h3>Confirm your lesson</h3>
       <p class="muted" id="modalSlotInfo"></p>
       <form id="bookForm">
@@ -129,8 +130,8 @@
         new Date(weekEnd - 1).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
       let q = db.from('slots')
-        .select('id, starts_at, duration_min, pool_id, coach_id, pools(name), profiles!coach_id(display_name)')
-        .eq('status', 'open')
+        .select('id, starts_at, duration_min, pool_id, coach_id, status, pools(name), profiles!coach_id(display_name, photo_url)')
+        .in('status', ['open', 'booked']) // booked stay visible, greyed out
         .gte('starts_at', new Date(Math.max(weekStart, Date.now())).toISOString())
         .lt('starts_at', weekEnd.toISOString())
         .order('starts_at');
@@ -192,9 +193,10 @@
           const st = new Date(s.starts_at);
           const b = bucketOf(st);
           if (b !== lastBucket) { cards += `<div class="bcal-bucket">${b}</div>`; lastBucket = b; }
+          const isBooked = s.status === 'booked';
           cards += `
-            <div class="slot-chip bcal-slot" data-id="${s.id}">
-              <div class="time">${fmtTime(st)}</div>
+            <div class="slot-chip bcal-slot${isBooked ? ' is-booked' : ''}"${isBooked ? '' : ` data-id="${s.id}"`}>
+              <div class="time">${fmtTime(st)}${isBooked ? ' <span class="badge booked">Booked</span>' : ''}</div>
               <div class="meta">${s.duration_min} min · ${esc(s.pools?.name || '')}${s.profiles ? '<br>Coach ' + esc(s.profiles.display_name) : ''}</div>
             </div>`;
         });
@@ -204,7 +206,7 @@
         </div>`;
       }).join('') + '</div>';
 
-      list.querySelectorAll('.bcal-slot').forEach(chip => {
+      list.querySelectorAll('.bcal-slot[data-id]').forEach(chip => {
         chip.onclick = () => openModal(lastFetched.find(s => s.id === chip.dataset.id));
       });
     }
@@ -215,6 +217,9 @@
       document.getElementById('modalSlotInfo').textContent =
         `${fmtDay(d)} at ${fmtTime(d)} · ${slot.duration_min} min · ${slot.pools?.name || ''}` +
         (slot.profiles ? ` · Coach ${slot.profiles.display_name}` : '');
+      const photo = document.getElementById('modalCoachPhoto');
+      if (slot.profiles?.photo_url) { photo.src = slot.profiles.photo_url; photo.style.display = 'block'; }
+      else photo.style.display = 'none';
       document.getElementById('bookMsg').className = 'msg';
       document.getElementById('bookModal').classList.add('show');
     }

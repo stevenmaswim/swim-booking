@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Swim Lessons</title>
+  <title>KSJ Swimming</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <nav>
     <div class="container">
-      <a class="brand" href="index.html">&#127946; Swim Lessons</a>
+      <a class="brand" href="index.html">&#127946; KSJ Swimming</a>
       <div class="nav-links">
         <a href="#coaches">Coaches</a>
         <a href="staff.html">Staff</a>
@@ -20,8 +20,8 @@
 
   <div class="hero">
     <div class="container">
-      <h1>Learn to Swim with Confidence</h1>
-      <p>Private lessons with experienced coaches at pools across the city. Book your weekly spot in under a minute — no account needed.</p>
+      <h1>KSJ Swimming</h1>
+      <p>Learn to swim with confidence — private lessons with experienced coaches at pools across the city. Book your weekly spot in under a minute, no account needed.</p>
       <a class="btn secondary" href="book.html">See Available Times &rarr;</a>
     </div>
   </div>
@@ -41,7 +41,7 @@
   </div>
 
   <footer>
-    <div class="container">Questions? Reach out through our WeChat group or book directly online.</div>
+    <div class="container">KSJ Swimming — questions? Reach out through our WeChat group or book directly online.</div>
   </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -55,8 +55,8 @@
         return;
       }
       const [coaches, pools] = await Promise.all([
-        db.from('profiles').select('display_name, bio').eq('is_public', true),
-        db.from('pools').select('name, address, notes').eq('active', true)
+        db.from('profiles').select('display_name, bio, photo_url').eq('is_public', true),
+        db.from('pools').select('name, address, notes, photo_url').eq('active', true)
       ]);
       if (coaches.error || pools.error)
         showFatalError('Could not load site data: ' + (coaches.error || pools.error).message);
@@ -64,7 +64,9 @@
       if (coaches.data && coaches.data.length) {
         cg.innerHTML = coaches.data.map(c => `
           <div class="card coach-card">
-            <div class="coach-avatar">${c.display_name.charAt(0).toUpperCase()}</div>
+            ${c.photo_url
+              ? `<img class="coach-photo" src="${escAttr(c.photo_url)}" alt="${escAttr(c.display_name)}">`
+              : `<div class="coach-avatar">${esc(c.display_name.charAt(0).toUpperCase())}</div>`}
             <h3>${esc(c.display_name)}</h3>
             <p class="muted">${esc(c.bio) || 'Swim coach'}</p>
           </div>`).join('');
@@ -75,7 +77,9 @@
       if (pools.data && pools.data.length) {
         pg.innerHTML = pools.data.map(p => `
           <div class="card coach-card">
-            <div class="coach-avatar">&#128205;</div>
+            ${p.photo_url
+              ? `<img class="pool-photo" src="${escAttr(p.photo_url)}" alt="${escAttr(p.name)}">`
+              : '<div class="coach-avatar">&#128205;</div>'}
             <h3>${esc(p.name)}</h3>
             <p class="muted">${esc(p.address)}</p>
             ${p.notes ? `<p class="muted">${esc(p.notes)}</p>` : ''}
@@ -85,6 +89,7 @@
       }
     }
     function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+    function escAttr(s) { return esc(s).replace(/"/g, '&quot;'); }
     load().catch(e => showFatalError('Could not load site data: ' + e.message));
   </script>
 </body>

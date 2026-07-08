@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Staff — Swim Lessons</title>
+  <title>Staff — KSJ Swimming</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <nav>
     <div class="container">
-      <a class="brand" href="index.html">&#127946; Swim Lessons <span class="muted" style="font-weight:500;">Staff</span></a>
+      <a class="brand" href="index.html">&#127946; KSJ Swimming <span class="muted" style="font-weight:500;">Staff</span></a>
       <div class="nav-links">
         <span id="whoami" class="muted"></span>
         <button class="btn small danger" id="logoutBtn" style="display:none;">Log out</button>
@@ -43,7 +43,6 @@
     <div class="msg" id="dashMsg"></div>
     <div class="tabs">
       <button data-tab="calendar" class="active">&#128197; Calendar</button>
-      <button data-tab="avail">&#9200; My Availability</button>
       <button data-tab="slots">&#10133; Publish Slots</button>
       <button data-tab="bookings">&#128203; Bookings</button>
       <button data-tab="clients">&#128101; Clients</button>
@@ -59,33 +58,8 @@
         <h2 id="calLabel"></h2>
         <button class="btn secondary small" id="calNext">Next &rarr;</button>
       </div>
-      <div id="calLegend" style="margin-bottom: 10px;"></div>
-      <p class="muted" style="margin-bottom:10px;">Shaded blocks = coach availability. <span class="badge open">Green</span> = open slot, <span class="badge booked">Blue</span> = booked slot. Click a slot for details.</p>
+      <p class="muted" style="margin-bottom:10px;"><span class="badge open">Green</span> = open slot, <span class="badge booked">Blue</span> = booked slot. Click a slot for details.</p>
       <div class="cal-wrap"><div class="cal" id="calGrid"></div></div>
-    </div>
-
-    <!-- Availability tab -->
-    <div id="tab-avail" style="display:none;">
-      <div class="card">
-        <h3>Add availability</h3>
-        <p class="muted">Mark when you can teach — it shows on the team calendar so slots get planned around real availability.</p>
-        <form id="availForm">
-          <div class="row">
-            <div><label>Date</label><input type="date" id="avDate" required></div>
-            <div><label>From</label><input type="time" id="avStart" required value="16:00"></div>
-            <div><label>To</label><input type="time" id="avEnd" required value="20:00"></div>
-            <div><label>Pool (optional)</label><select id="avPool"><option value="">Any pool</option></select></div>
-          </div>
-          <label>Note (optional)</label>
-          <input id="avNote" placeholder="e.g. prefer kids' lessons">
-          <div class="msg" id="availMsg"></div>
-          <button class="btn" style="margin-top:14px;">Add availability</button>
-        </form>
-      </div>
-      <div class="card">
-        <h3>My upcoming availability</h3>
-        <div id="availList"><p class="empty">Loading…</p></div>
-      </div>
     </div>
 
     <!-- Publish slots tab -->
@@ -189,6 +163,13 @@
       <div class="card" style="max-width: 520px;">
         <h3>My coach profile</h3>
         <p class="muted">Shown on the public "About the Coaches" page if visible.</p>
+        <label>Photo</label>
+        <div style="display:flex; align-items:center; gap:14px; margin-bottom:4px;">
+          <img id="mePhotoPreview" class="avatar-preview" alt="" style="display:none;">
+          <div id="mePhotoFallback" class="coach-avatar" style="margin:0;"></div>
+          <input type="file" id="mePhotoFile" accept="image/*" style="width:auto;">
+        </div>
+        <p class="muted" style="margin-bottom:0;">Photos are resized to 800px and shown on the public site.</p>
         <form id="meForm">
           <label>Display name</label>
           <input id="meName" required>
@@ -227,6 +208,7 @@
       <textarea id="cmNotes" rows="3" placeholder="e.g. prefers Coach Sam, pays for 4 lessons at a time"></textarea>
       <div class="msg" id="cmMsg"></div>
       <button class="btn small" id="cmSaveNotes" style="margin-top:10px;">Save notes</button>
+      <button class="btn small danger" id="cmDelete" style="margin-top:10px; margin-left:8px; display:none;">Delete client</button>
       <h3 style="margin-top:20px;">Booking history</h3>
       <div style="overflow-x:auto;"><div id="cmHistory"><p class="empty">Loading&hellip;</p></div></div>
       <button class="btn secondary" style="margin-top:16px;" onclick="document.getElementById('clientModal').classList.remove('show')">Close</button>
@@ -243,7 +225,6 @@
     let clientsCache = [], clientStats = {};
     let defaultPrice = 0, revChart = null;
     let calStart = startOfWeek(new Date());
-    const COLORS = ['#0ea5e9','#8b5cf6','#f59e0b','#10b981','#ef4444','#ec4899','#14b8a6','#f97316'];
     const DAY_START = 6, DAY_END = 22, HOUR_PX = 48;
 
     function startOfWeek(d) {
@@ -252,16 +233,13 @@
       return x;
     }
     function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+    function escAttr(s) { return esc(s).replace(/"/g, '&quot;'); }
     function fmtTime(d) { return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); }
     function fmtDT(d) { return d.toLocaleDateString(undefined, { weekday:'short', month:'short', day:'numeric' }) + ' ' + fmtTime(d); }
     function showMsg(id, text, type) {
       const el = document.getElementById(id);
       el.textContent = text; el.className = 'msg show ' + type;
       if (type === 'success') setTimeout(() => el.className = 'msg', 3500);
-    }
-    function coachColor(id) {
-      const i = coaches.findIndex(c => c.id === id);
-      return COLORS[(i < 0 ? 0 : i) % COLORS.length];
     }
     function localISO(dateStr, timeStr) { return new Date(dateStr + 'T' + timeStr).toISOString(); }
 
@@ -320,7 +298,7 @@
       if (!myProfile) await createMissingProfile();
       document.getElementById('whoami').textContent = myProfile ? myProfile.display_name : user.email;
       renderCalendar();
-      loadAvail(); loadSlotAdmin(); loadBookings(); loadClients(); loadPoolAdmin(); fillProfileForm();
+      loadSlotAdmin(); loadBookings(); loadClients(); loadPoolAdmin(); fillProfileForm();
     }
     // A staff member allowlisted *after* their first sign-in has no
     // auto-created profile — create it here from the Google display name.
@@ -371,13 +349,10 @@
       myProfile = coaches.find(x => x.id === me.id) || null;
 
       const activePools = pools.filter(x => x.active);
-      for (const [selId, includeEmpty, emptyLabel] of [
-        ['avPool', true, 'Any pool'], ['slPool', false, ''], ]) {
-        const sel = document.getElementById(selId);
-        sel.innerHTML = includeEmpty ? `<option value="">${emptyLabel}</option>` : '';
-        activePools.forEach(x => sel.insertAdjacentHTML('beforeend',
-          `<option value="${x.id}">${esc(x.name)}</option>`));
-      }
+      const slPoolSel = document.getElementById('slPool');
+      slPoolSel.innerHTML = '';
+      activePools.forEach(x => slPoolSel.insertAdjacentHTML('beforeend',
+        `<option value="${x.id}">${esc(x.name)}</option>`));
       const cs = document.getElementById('slCoach');
       cs.innerHTML = '<option value="">Unassigned</option>';
       coaches.forEach(x => cs.insertAdjacentHTML('beforeend',
@@ -388,7 +363,7 @@
     document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
       document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
-      ['calendar','avail','slots','bookings','clients','pools','me','revenue'].forEach(t =>
+      ['calendar','slots','bookings','clients','pools','me','revenue'].forEach(t =>
         document.getElementById('tab-' + t).style.display = (t === b.dataset.tab) ? 'block' : 'none');
       if (b.dataset.tab === 'revenue') loadRevenue();
     });
@@ -400,21 +375,13 @@
         calStart.toLocaleDateString(undefined, { month:'short', day:'numeric' }) + ' – ' +
         new Date(end - 1).toLocaleDateString(undefined, { month:'short', day:'numeric', year:'numeric' });
 
-      const [av, sl] = await Promise.all([
-        db.from('availability').select('*, profiles(display_name), pools(name)')
-          .gte('day', calStart.toISOString().slice(0,10)).lt('day', end.toISOString().slice(0,10)),
-        // No '*': the price column is deliberately not readable via the API
-        db.from('slots').select('id, pool_id, coach_id, starts_at, duration_min, status, profiles!coach_id(display_name), pools(name)')
-          .gte('starts_at', calStart.toISOString()).lt('starts_at', end.toISOString())
-          .neq('status', 'cancelled')
-      ]);
-      if (av.error || sl.error)
-        showMsg('dashMsg', 'Could not load the calendar: ' + (av.error || sl.error).message, 'error');
-
-      document.getElementById('calLegend').innerHTML = coaches.map(c =>
-        `<span style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;font-size:0.82rem;">
-          <span style="width:11px;height:11px;border-radius:3px;background:${coachColor(c.id)};display:inline-block;"></span>
-          ${esc(c.display_name)}</span>`).join('');
+      // No '*': the price column is deliberately not readable via the API
+      const sl = await db.from('slots')
+        .select('id, pool_id, coach_id, starts_at, duration_min, status, profiles!coach_id(display_name), pools(name)')
+        .gte('starts_at', calStart.toISOString()).lt('starts_at', end.toISOString())
+        .neq('status', 'cancelled');
+      if (sl.error)
+        showMsg('dashMsg', 'Could not load the calendar: ' + sl.error.message, 'error');
 
       const grid = document.getElementById('calGrid');
       let html = '<div class="head"></div>';
@@ -446,18 +413,6 @@
         if (onclick) el.onclick = onclick;
         col.appendChild(el);
       }
-
-      (av.data || []).forEach(a => {
-        const dayIdx = Math.round((new Date(a.day + 'T00:00') - calStart) / 86400000);
-        const [sh, sm] = a.start_time.split(':').map(Number);
-        const [eh, em] = a.end_time.split(':').map(Number);
-        const color = coachColor(a.coach_id);
-        place(dayIdx, sh * 60 + sm, eh * 60 + em, '',
-          `background:${color}22;border-color:${color};color:#334155;z-index:1;`,
-          esc(a.profiles?.display_name || '') + (a.pools ? '<br>' + esc(a.pools.name) : ''),
-          `${a.profiles?.display_name} available ${a.start_time.slice(0,5)}–${a.end_time.slice(0,5)}` +
-          (a.pools ? ' @ ' + a.pools.name : '') + (a.note ? ' — ' + a.note : ''));
-      });
 
       (sl.data || []).forEach(s => {
         const st = new Date(s.starts_at);
@@ -493,6 +448,9 @@
             <span class="muted">&#9993; ${esc(data.email)}<br>&#128222; ${esc(data.phone)}</span>
           </div>`;
       }
+      // Coaches may only cancel their own slots; admins any (DB enforces too)
+      document.getElementById('smDelete').style.display =
+        (isAdmin || s.coach_id === me.id) ? '' : 'none';
       document.getElementById('smDelete').onclick = async () => {
         if (!confirm(s.status === 'booked'
           ? 'This slot is BOOKED. Cancelling removes the booking too. Continue?'
@@ -508,43 +466,6 @@
         renderCalendar(); loadSlotAdmin(); loadBookings();
       };
       document.getElementById('slotModal').classList.add('show');
-    }
-
-    // ================= Availability =================
-    document.getElementById('availForm').onsubmit = async (e) => {
-      e.preventDefault();
-      const { error } = await db.from('availability').insert({
-        coach_id: me.id,
-        day: document.getElementById('avDate').value,
-        start_time: document.getElementById('avStart').value,
-        end_time: document.getElementById('avEnd').value,
-        pool_id: document.getElementById('avPool').value || null,
-        note: document.getElementById('avNote').value
-      });
-      if (error) { showMsg('availMsg', error.message, 'error'); return; }
-      showMsg('availMsg', 'Availability added.', 'success');
-      loadAvail(); renderCalendar();
-    };
-    async function loadAvail() {
-      const { data, error } = await db.from('availability').select('*, pools(name)')
-        .eq('coach_id', me.id)
-        .gte('day', new Date().toISOString().slice(0,10))
-        .order('day').order('start_time');
-      const el = document.getElementById('availList');
-      if (error) { el.innerHTML = ''; showMsg('availMsg', 'Could not load availability: ' + error.message, 'error'); return; }
-      if (!data || !data.length) { el.innerHTML = '<p class="empty">Nothing scheduled yet.</p>'; return; }
-      el.innerHTML = '<table><tr><th>Date</th><th>Time</th><th>Pool</th><th>Note</th><th></th></tr>' +
-        data.map(a => `<tr>
-          <td>${new Date(a.day + 'T00:00').toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})}</td>
-          <td>${a.start_time.slice(0,5)}–${a.end_time.slice(0,5)}</td>
-          <td>${esc(a.pools?.name || 'Any')}</td>
-          <td>${esc(a.note)}</td>
-          <td><button class="btn small danger" data-del="${a.id}">Remove</button></td>
-        </tr>`).join('') + '</table>';
-      el.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
-        await db.from('availability').delete().eq('id', b.dataset.del);
-        loadAvail(); renderCalendar();
-      });
     }
 
     // ================= Publish slots =================
@@ -618,14 +539,18 @@
         '<div class="bulkbar"><button class="btn small danger" id="cancelSelected" disabled>Cancel selected</button>' +
         '<span class="muted" id="selCount">None selected</span></div>' +
         '<table><tr><th><input type="checkbox" id="selAll" title="Select all"></th><th>When</th><th>Pool</th><th>Coach</th><th>Status</th><th></th></tr>' +
-        data.map(s => `<tr>
-          <td><input type="checkbox" class="rowSel" data-id="${s.id}" data-status="${s.status}"></td>
+        data.map(s => {
+          // Coaches may only cancel their own slots (DB enforces this too)
+          const can = isAdmin || s.coach_id === me.id;
+          return `<tr>
+          <td>${can ? `<input type="checkbox" class="rowSel" data-id="${s.id}" data-status="${s.status}">` : ''}</td>
           <td>${fmtDT(new Date(s.starts_at))} (${s.duration_min}m)</td>
           <td>${esc(s.pools?.name || '')}</td>
           <td>${esc(s.profiles?.display_name || '—')}</td>
           <td><span class="badge ${s.status}">${s.status}</span></td>
-          <td><button class="btn small danger" data-cancel="${s.id}" data-status="${s.status}">Cancel</button></td>
-        </tr>`).join('') + '</table>';
+          <td>${can ? `<button class="btn small danger" data-cancel="${s.id}" data-status="${s.status}">Cancel</button>` : ''}</td>
+        </tr>`;
+        }).join('') + '</table>';
 
       const rowSels = () => Array.from(el.querySelectorAll('.rowSel'));
       const checked = () => rowSels().filter(c => c.checked);
@@ -648,7 +573,7 @@
     // ================= Bookings =================
     async function loadBookings() {
       const { data, error } = await db.from('bookings')
-        .select('*, slots!inner(starts_at, duration_min, pools(name), profiles!coach_id(display_name))')
+        .select('*, slots!inner(coach_id, starts_at, duration_min, pools(name), profiles!coach_id(display_name))')
         .eq('status', 'confirmed')
         .gte('slots.starts_at', new Date().toISOString())
         .order('created_at', { ascending: false }).limit(200);
@@ -664,7 +589,8 @@
           <td>${esc(b.student_name)}</td>
           <td><a href="mailto:${esc(b.email)}">${esc(b.email)}</a></td>
           <td><a href="tel:${esc(b.phone)}">${esc(b.phone)}</a></td>
-          <td><button class="btn small danger" data-bcancel="${b.id}" data-slot="${b.slot_id}">Cancel</button></td>
+          <td>${(isAdmin || b.slots.coach_id === me.id)
+            ? `<button class="btn small danger" data-bcancel="${b.id}" data-slot="${b.slot_id}">Cancel</button>` : ''}</td>
         </tr>`).join('') + '</table>';
       el.querySelectorAll('[data-bcancel]').forEach(btn => btn.onclick = async () => {
         if (!confirm('Cancel this booking and reopen the slot?')) return;
@@ -736,6 +662,19 @@
       document.getElementById('cmNotes').value = c.notes || '';
       document.getElementById('cmMsg').className = 'msg';
       document.getElementById('cmHistory').innerHTML = '<p class="empty">Loading…</p>';
+      // Only admins may edit or delete client data (the DB enforces this
+      // too — coaches have no update policy and delete_client() refuses)
+      document.getElementById('cmNotes').readOnly = !isAdmin;
+      document.getElementById('cmSaveNotes').style.display = isAdmin ? '' : 'none';
+      const delBtn = document.getElementById('cmDelete');
+      delBtn.style.display = isAdmin ? '' : 'none';
+      delBtn.onclick = async () => {
+        if (!confirm(`Delete ${c.name}? This permanently removes the client and anonymizes their past bookings (lesson history and revenue are kept, without the personal details). This cannot be undone.`)) return;
+        const { error } = await db.rpc('delete_client', { p_client_id: c.id });
+        if (error) { showMsg('cmMsg', 'Could not delete: ' + error.message, 'error'); return; }
+        document.getElementById('clientModal').classList.remove('show');
+        loadClients();
+      };
       document.getElementById('clientModal').classList.add('show');
 
       document.getElementById('cmSaveNotes').onclick = async () => {
@@ -821,6 +760,46 @@
       showMsg('revMsg', 'Default price saved.', 'success');
     };
 
+    // ================= Photos =================
+    async function resizeImage(file, maxDim = 800) {
+      const img = await new Promise((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = () => reject(new Error('Could not read that image file.'));
+        i.src = URL.createObjectURL(file);
+      });
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(img.width * scale));
+      canvas.height = Math.max(1, Math.round(img.height * scale));
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(img.src);
+      return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+    }
+    async function uploadPhoto(path, file, msgId) {
+      let blob;
+      try { blob = await resizeImage(file); } catch (e) { showMsg(msgId, e.message, 'error'); return null; }
+      const { error } = await db.storage.from('photos')
+        .upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
+      if (error) {
+        showMsg(msgId, 'Upload failed: ' + error.message + ' (is the "photos" storage bucket set up? See README.)', 'error');
+        return null;
+      }
+      const { data } = db.storage.from('photos').getPublicUrl(path);
+      return data.publicUrl + '?v=' + Date.now(); // cache-buster so replacements show
+    }
+    document.getElementById('mePhotoFile').onchange = async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const url = await uploadPhoto('coaches/' + me.id + '.jpg', f, 'meMsg');
+      if (!url) return;
+      const { error } = await db.from('profiles').update({ photo_url: url }).eq('id', me.id);
+      if (error) { showMsg('meMsg', 'Could not save photo: ' + error.message, 'error'); return; }
+      showMsg('meMsg', 'Photo updated.', 'success');
+      await loadBaseData();
+      fillProfileForm();
+    };
+
     // ================= Pools =================
     document.getElementById('poolForm').onsubmit = async (e) => {
       e.preventDefault();
@@ -837,22 +816,48 @@
     async function loadPoolAdmin() {
       const el = document.getElementById('poolList');
       if (!pools.length) { el.innerHTML = '<p class="empty">No pools yet — add your first one above.</p>'; return; }
-      el.innerHTML = '<table><tr><th>Name</th><th>Address</th><th>Status</th><th></th></tr>' +
+      el.innerHTML = '<table><tr><th>Photo</th><th>Name</th><th>Address</th><th>Status</th><th></th></tr>' +
         pools.map(p => `<tr>
+          <td>${p.photo_url ? `<img class="pool-thumb" src="${escAttr(p.photo_url)}" alt="">` : '<span class="muted">&mdash;</span>'}</td>
           <td><strong>${esc(p.name)}</strong></td>
           <td>${esc(p.address)}</td>
           <td><span class="badge ${p.active ? 'open' : 'cancelled'}">${p.active ? 'active' : 'inactive'}</span></td>
-          <td><button class="btn small secondary" data-toggle="${p.id}" data-active="${p.active}">
-            ${p.active ? 'Deactivate' : 'Reactivate'}</button></td>
+          <td style="white-space:nowrap;">
+            <button class="btn small secondary" data-toggle="${p.id}" data-active="${p.active}">${p.active ? 'Deactivate' : 'Reactivate'}</button>
+            <button class="btn small secondary" data-upload="${p.id}">${p.photo_url ? 'Replace photo' : 'Add photo'}</button>
+            <input type="file" accept="image/*" data-photo-input="${p.id}" style="display:none;">
+          </td>
         </tr>`).join('') + '</table>';
       el.querySelectorAll('[data-toggle]').forEach(b => b.onclick = async () => {
         await db.from('pools').update({ active: b.dataset.active !== 'true' }).eq('id', b.dataset.toggle);
+        await loadBaseData(); loadPoolAdmin();
+      });
+      el.querySelectorAll('[data-upload]').forEach(b => b.onclick = () =>
+        el.querySelector(`[data-photo-input="${b.dataset.upload}"]`).click());
+      el.querySelectorAll('[data-photo-input]').forEach(inp => inp.onchange = async () => {
+        const f = inp.files[0];
+        if (!f) return;
+        const id = inp.dataset.photoInput;
+        const url = await uploadPhoto('pools/' + id + '.jpg', f, 'poolMsg');
+        if (!url) return;
+        const { error } = await db.from('pools').update({ photo_url: url }).eq('id', id);
+        if (error) { showMsg('poolMsg', 'Could not save photo: ' + error.message, 'error'); return; }
+        showMsg('poolMsg', 'Photo updated.', 'success');
         await loadBaseData(); loadPoolAdmin();
       });
     }
 
     // ================= Profile =================
     function fillProfileForm() {
+      const img = document.getElementById('mePhotoPreview');
+      const fb = document.getElementById('mePhotoFallback');
+      if (myProfile && myProfile.photo_url) {
+        img.src = myProfile.photo_url;
+        img.style.display = 'block'; fb.style.display = 'none';
+      } else {
+        img.style.display = 'none'; fb.style.display = 'flex';
+        fb.textContent = ((myProfile && myProfile.display_name) || me.email || '?').charAt(0).toUpperCase();
+      }
       if (!myProfile) return;
       document.getElementById('meName').value = myProfile.display_name;
       document.getElementById('meBio').value = myProfile.bio;
