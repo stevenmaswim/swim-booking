@@ -46,8 +46,10 @@
       <button data-tab="avail">&#9200; My Availability</button>
       <button data-tab="slots">&#10133; Publish Slots</button>
       <button data-tab="bookings">&#128203; Bookings</button>
+      <button data-tab="clients">&#128101; Clients</button>
       <button data-tab="pools">&#128205; Pools</button>
       <button data-tab="me">&#128100; My Profile</button>
+      <button data-tab="revenue" id="revTabBtn" style="display:none;">&#128176; Revenue</button>
     </div>
 
     <!-- Calendar tab -->
@@ -103,6 +105,7 @@
           <div class="row">
             <div><label>Pool</label><select id="slPool" required></select></div>
             <div><label>Coach</label><select id="slCoach"><option value="">Unassigned</option></select></div>
+            <div><label>Price ($ per slot)</label><input type="number" id="slPrice" min="0" step="0.01" required></div>
           </div>
           <div class="msg" id="slotMsg"></div>
           <button class="btn" style="margin-top:14px;">Publish slots</button>
@@ -120,6 +123,43 @@
         <h3>Upcoming bookings</h3>
         <div class="msg" id="bookingsMsg"></div>
         <div style="overflow-x:auto;"><div id="bookingsList"><p class="empty">Loading…</p></div></div>
+      </div>
+    </div>
+
+    <!-- Clients tab -->
+    <div id="tab-clients" style="display:none;">
+      <div class="card">
+        <h3>Clients</h3>
+        <p class="muted">Everyone who has ever booked a lesson. Click a client for their booking history and notes.</p>
+        <input id="clientSearch" placeholder="Search by name, email or phone&hellip;" style="margin-top:10px;">
+        <div class="msg" id="clientsMsg"></div>
+        <div style="overflow-x:auto;"><div id="clientsList" style="margin-top:12px;"><p class="empty">Loading&hellip;</p></div></div>
+      </div>
+    </div>
+
+    <!-- Revenue tab (admins only — also enforced in the database) -->
+    <div id="tab-revenue" style="display:none;">
+      <div class="card">
+        <h3>Revenue</h3>
+        <div class="row" style="align-items:flex-end;">
+          <div><label>Group by</label><select id="revPeriod">
+            <option value="week" selected>Week</option>
+            <option value="month">Month</option>
+          </select></div>
+          <div><label>Default lesson price ($)</label><input type="number" id="defPrice" min="0" step="0.01"></div>
+          <div><button class="btn secondary" id="saveDefPrice" type="button" style="margin-bottom:1px;">Save default</button></div>
+        </div>
+        <div class="msg" id="revMsg"></div>
+        <div id="revTotals" style="margin:14px 0; font-size:1.05rem;"></div>
+        <div style="max-width:720px;"><canvas id="revChart" height="130"></canvas></div>
+      </div>
+      <div class="card">
+        <h3 id="revPeriodTitle">By week</h3>
+        <div style="overflow-x:auto;"><div id="revByPeriod"><p class="empty">Loading&hellip;</p></div></div>
+      </div>
+      <div class="row">
+        <div class="card"><h3>By coach</h3><div id="revByCoach"></div></div>
+        <div class="card"><h3>By pool</h3><div id="revByPool"></div></div>
       </div>
     </div>
 
@@ -177,12 +217,31 @@
     </div>
   </div>
 
+  <!-- Client detail modal -->
+  <div class="modal-backdrop" id="clientModal">
+    <div class="modal" style="max-width: 560px;">
+      <h3 id="cmName"></h3>
+      <p class="muted" id="cmContact"></p>
+      <p class="muted" id="cmStats"></p>
+      <label for="cmNotes">Notes</label>
+      <textarea id="cmNotes" rows="3" placeholder="e.g. prefers Coach Sam, pays for 4 lessons at a time"></textarea>
+      <div class="msg" id="cmMsg"></div>
+      <button class="btn small" id="cmSaveNotes" style="margin-top:10px;">Save notes</button>
+      <h3 style="margin-top:20px;">Booking history</h3>
+      <div style="overflow-x:auto;"><div id="cmHistory"><p class="empty">Loading&hellip;</p></div></div>
+      <button class="btn secondary" style="margin-top:16px;" onclick="document.getElementById('clientModal').classList.remove('show')">Close</button>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="config.js"></script>
   <script>
     // ================= State =================
-    let me = null, myProfile = null;
+    let me = null, myProfile = null, isAdmin = false;
     let pools = [], coaches = [];
+    let clientsCache = [], clientStats = {};
+    let defaultPrice = 0, revChart = null;
     let calStart = startOfWeek(new Date());
     const COLORS = ['#0ea5e9','#8b5cf6','#f59e0b','#10b981','#ef4444','#ec4899','#14b8a6','#f97316'];
     const DAY_START = 6, DAY_END = 22, HOUR_PX = 48;
@@ -252,11 +311,16 @@
       document.getElementById('loginView').style.display = 'none';
       document.getElementById('dashView').style.display = 'block';
       document.getElementById('logoutBtn').style.display = 'inline-block';
+      // The Revenue tab is only shown to admins; the database enforces
+      // this independently (get_revenue_report raises for non-admins).
+      const { data: adm } = await db.rpc('is_admin');
+      isAdmin = adm === true;
+      document.getElementById('revTabBtn').style.display = isAdmin ? '' : 'none';
       await loadBaseData();
       if (!myProfile) await createMissingProfile();
       document.getElementById('whoami').textContent = myProfile ? myProfile.display_name : user.email;
       renderCalendar();
-      loadAvail(); loadSlotAdmin(); loadBookings(); loadPoolAdmin(); fillProfileForm();
+      loadAvail(); loadSlotAdmin(); loadBookings(); loadClients(); loadPoolAdmin(); fillProfileForm();
     }
     // A staff member allowlisted *after* their first sign-in has no
     // auto-created profile — create it here from the Google display name.
@@ -289,13 +353,21 @@
 
     // ================= Base data =================
     async function loadBaseData() {
-      const [p, c] = await Promise.all([
+      const [p, c, st] = await Promise.all([
         db.from('pools').select('*').order('name'),
-        db.from('profiles').select('*').order('display_name')
+        db.from('profiles').select('*').order('display_name'),
+        db.from('settings').select('default_price').eq('id', 1).maybeSingle()
       ]);
       if (p.error || c.error)
         showMsg('dashMsg', 'Could not load pools/coaches: ' + (p.error || c.error).message, 'error');
+      if (st.error)
+        showMsg('dashMsg', 'Could not load settings: ' + st.error.message +
+          ' (has supabase/migration_clients_revenue.sql been run?)', 'error');
       pools = p.data || []; coaches = c.data || [];
+      defaultPrice = st.data ? Number(st.data.default_price) : 0;
+      const priceEl = document.getElementById('slPrice');
+      if (!priceEl.value) priceEl.value = defaultPrice.toFixed(2);
+      document.getElementById('defPrice').value = defaultPrice.toFixed(2);
       myProfile = coaches.find(x => x.id === me.id) || null;
 
       const activePools = pools.filter(x => x.active);
@@ -316,8 +388,9 @@
     document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
       document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
-      ['calendar','avail','slots','bookings','pools','me'].forEach(t =>
+      ['calendar','avail','slots','bookings','clients','pools','me','revenue'].forEach(t =>
         document.getElementById('tab-' + t).style.display = (t === b.dataset.tab) ? 'block' : 'none');
+      if (b.dataset.tab === 'revenue') loadRevenue();
     });
 
     // ================= Calendar =================
@@ -330,7 +403,8 @@
       const [av, sl] = await Promise.all([
         db.from('availability').select('*, profiles(display_name), pools(name)')
           .gte('day', calStart.toISOString().slice(0,10)).lt('day', end.toISOString().slice(0,10)),
-        db.from('slots').select('*, profiles!coach_id(display_name), pools(name)')
+        // No '*': the price column is deliberately not readable via the API
+        db.from('slots').select('id, pool_id, coach_id, starts_at, duration_min, status, profiles!coach_id(display_name), pools(name)')
           .gte('starts_at', calStart.toISOString()).lt('starts_at', end.toISOString())
           .neq('status', 'cancelled')
       ]);
@@ -480,6 +554,8 @@
       const start = document.getElementById('slStart').value;
       const dur = parseInt(document.getElementById('slDur').value);
       const count = parseInt(document.getElementById('slCount').value);
+      const price = parseFloat(document.getElementById('slPrice').value);
+      if (!(price >= 0)) { showMsg('slotMsg', 'Please enter a price (0 is allowed for free lessons).', 'error'); return; }
       const rows = [];
       for (let i = 0; i < count; i++) {
         const t = new Date(date + 'T' + start);
@@ -489,7 +565,8 @@
           coach_id: document.getElementById('slCoach').value || null,
           starts_at: t.toISOString(),
           duration_min: dur,
-          created_by: me.id
+          created_by: me.id,
+          price: price
         });
       }
       const { error } = await db.from('slots').insert(rows);
@@ -530,7 +607,7 @@
     }
 
     async function loadSlotAdmin() {
-      const { data, error } = await db.from('slots').select('*, pools(name), profiles!coach_id(display_name)')
+      const { data, error } = await db.from('slots').select('id, pool_id, coach_id, starts_at, duration_min, status, pools(name), profiles!coach_id(display_name)')
         .gte('starts_at', new Date().toISOString())
         .neq('status', 'cancelled')
         .order('starts_at').limit(100);
@@ -596,6 +673,153 @@
         loadBookings(); loadSlotAdmin(); renderCalendar();
       });
     }
+
+    // ================= Clients (CRM) =================
+    async function loadClients() {
+      const [cRes, bRes] = await Promise.all([
+        db.from('clients').select('*').order('name'),
+        db.from('bookings').select('client_id, status, slots(starts_at)').limit(5000)
+      ]);
+      const el = document.getElementById('clientsList');
+      if (cRes.error) {
+        el.innerHTML = '';
+        showMsg('clientsMsg', 'Could not load clients: ' + cRes.error.message +
+          ' (has supabase/migration_clients_revenue.sql been run?)', 'error');
+        return;
+      }
+      if (bRes.error) showMsg('clientsMsg', 'Could not load booking stats: ' + bRes.error.message, 'error');
+      clientsCache = cRes.data || [];
+      clientStats = {};
+      (bRes.data || []).forEach(b => {
+        if (!b.client_id) return;
+        const s = clientStats[b.client_id] = clientStats[b.client_id] || { lessons: 0, cancelled: 0, last: null };
+        if (b.status === 'confirmed') {
+          s.lessons++;
+          const t = b.slots ? b.slots.starts_at : null;
+          if (t && (!s.last || t > s.last)) s.last = t;
+        } else s.cancelled++;
+      });
+      renderClients();
+    }
+    function renderClients() {
+      const el = document.getElementById('clientsList');
+      const term = document.getElementById('clientSearch').value.trim().toLowerCase();
+      const rows = clientsCache.filter(c => !term ||
+        (c.name + ' ' + c.email + ' ' + c.phone).toLowerCase().includes(term));
+      if (!clientsCache.length) { el.innerHTML = '<p class="empty">No clients yet — they appear automatically with their first booking.</p>'; return; }
+      if (!rows.length) { el.innerHTML = '<p class="empty">No clients match your search.</p>'; return; }
+      el.innerHTML = '<table><tr><th>Name</th><th>Email</th><th>Phone</th><th>Lessons</th><th>Cancelled</th><th>Last lesson</th><th>Notes</th></tr>' +
+        rows.map(c => {
+          const s = clientStats[c.id] || { lessons: 0, cancelled: 0, last: null };
+          return `<tr class="clickable" data-client="${c.id}">
+            <td><strong>${esc(c.name)}</strong></td>
+            <td>${esc(c.email)}</td>
+            <td>${esc(c.phone)}</td>
+            <td>${s.lessons}</td>
+            <td>${s.cancelled}</td>
+            <td>${s.last ? fmtDT(new Date(s.last)) : '—'}</td>
+            <td class="muted">${esc((c.notes || '').slice(0, 40))}${(c.notes || '').length > 40 ? '…' : ''}</td>
+          </tr>`;
+        }).join('') + '</table>';
+      el.querySelectorAll('[data-client]').forEach(tr => tr.onclick = () =>
+        openClientModal(clientsCache.find(c => c.id === tr.dataset.client)));
+    }
+    document.getElementById('clientSearch').oninput = renderClients;
+
+    async function openClientModal(c) {
+      if (!c) return;
+      const s = clientStats[c.id] || { lessons: 0, cancelled: 0, last: null };
+      document.getElementById('cmName').textContent = c.name;
+      document.getElementById('cmContact').textContent = c.email + (c.phone ? ' · ' + c.phone : '');
+      document.getElementById('cmStats').textContent =
+        `${s.lessons} lesson${s.lessons === 1 ? '' : 's'} · ${s.cancelled} cancelled · client since ${new Date(c.created_at).toLocaleDateString()}`;
+      document.getElementById('cmNotes').value = c.notes || '';
+      document.getElementById('cmMsg').className = 'msg';
+      document.getElementById('cmHistory').innerHTML = '<p class="empty">Loading…</p>';
+      document.getElementById('clientModal').classList.add('show');
+
+      document.getElementById('cmSaveNotes').onclick = async () => {
+        const notes = document.getElementById('cmNotes').value;
+        const { data, error } = await db.from('clients').update({ notes }).eq('id', c.id).select('id');
+        if (error) { showMsg('cmMsg', 'Could not save: ' + error.message, 'error'); return; }
+        if (!data || !data.length) { showMsg('cmMsg', 'Could not save — reload and try again.', 'error'); return; }
+        c.notes = notes;
+        showMsg('cmMsg', 'Notes saved.', 'success');
+        renderClients();
+      };
+
+      const { data, error } = await db.from('bookings')
+        .select('id, status, student_name, created_at, slots(starts_at, duration_min, pools(name), profiles!coach_id(display_name))')
+        .eq('client_id', c.id);
+      const h = document.getElementById('cmHistory');
+      if (error) { h.innerHTML = ''; showMsg('cmMsg', 'Could not load history: ' + error.message, 'error'); return; }
+      if (!data || !data.length) { h.innerHTML = '<p class="empty">No bookings on record.</p>'; return; }
+      data.sort((a, b) => new Date(b.slots?.starts_at || 0) - new Date(a.slots?.starts_at || 0));
+      h.innerHTML = '<table><tr><th>Lesson</th><th>Student</th><th>Pool</th><th>Coach</th><th>Status</th></tr>' +
+        data.map(b => `<tr>
+          <td>${b.slots ? fmtDT(new Date(b.slots.starts_at)) : '—'}</td>
+          <td>${esc(b.student_name)}</td>
+          <td>${esc(b.slots?.pools?.name || '')}</td>
+          <td>${esc(b.slots?.profiles?.display_name || '—')}</td>
+          <td><span class="badge ${b.status === 'confirmed' ? 'booked' : 'cancelled'}">${b.status}</span></td>
+        </tr>`).join('') + '</table>';
+    }
+
+    // ================= Revenue (admins only) =================
+    // The database is the real gate: get_revenue_report() raises an
+    // exception for non-admins, and the slots.price column has no API
+    // read grant — this tab is just presentation.
+    async function loadRevenue() {
+      if (!isAdmin) return;
+      const period = document.getElementById('revPeriod').value;
+      document.getElementById('revPeriodTitle').textContent = 'By ' + period;
+      const { data, error } = await db.rpc('get_revenue_report', { p_period: period });
+      if (error) { showMsg('revMsg', 'Could not load revenue: ' + error.message, 'error'); return; }
+      renderRevenue(data, period);
+    }
+    function money(x) { return '$' + Number(x || 0).toFixed(2); }
+    function fmtPeriod(iso, period) {
+      const d = new Date(iso);
+      return period === 'month'
+        ? d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+        : 'Week of ' + d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+    function renderRevenue(r, period) {
+      document.getElementById('revTotals').innerHTML =
+        `<strong>${money(r.total_revenue)}</strong> total revenue · <strong>${r.total_lessons}</strong> lessons (all confirmed bookings)`;
+      const tbl = (rows, nameKey, nameLabel) => !rows.length
+        ? '<p class="empty">No confirmed bookings yet.</p>'
+        : `<table><tr><th>${nameLabel}</th><th>Lessons</th><th>Revenue</th></tr>` +
+          rows.map(x => `<tr><td>${nameKey === 'period' ? fmtPeriod(x.period, period) : esc(x[nameKey])}</td>
+            <td>${x.lessons}</td><td>${money(x.revenue)}</td></tr>`).join('') + '</table>';
+      document.getElementById('revByPeriod').innerHTML = tbl(r.by_period || [], 'period', period === 'month' ? 'Month' : 'Week');
+      document.getElementById('revByCoach').innerHTML = tbl(r.by_coach || [], 'coach', 'Coach');
+      document.getElementById('revByPool').innerHTML = tbl(r.by_pool || [], 'pool', 'Pool');
+
+      if (typeof Chart === 'undefined') return; // chart CDN blocked — tables still work
+      const rows = (r.by_period || []).slice().reverse();
+      if (revChart) revChart.destroy();
+      revChart = new Chart(document.getElementById('revChart'), {
+        type: 'bar',
+        data: {
+          labels: rows.map(x => fmtPeriod(x.period, period)),
+          datasets: [{ label: 'Revenue', data: rows.map(x => Number(x.revenue)), backgroundColor: '#0ea5e9' }]
+        },
+        options: { plugins: { legend: { display: false } },
+          scales: { y: { beginAtZero: true, ticks: { callback: v => '$' + v } } } }
+      });
+    }
+    document.getElementById('revPeriod').onchange = loadRevenue;
+    document.getElementById('saveDefPrice').onclick = async () => {
+      const v = parseFloat(document.getElementById('defPrice').value);
+      if (!(v >= 0)) { showMsg('revMsg', 'Enter a valid default price.', 'error'); return; }
+      const { data, error } = await db.from('settings').update({ default_price: v }).eq('id', 1).select('id');
+      if (error) { showMsg('revMsg', 'Could not save: ' + error.message, 'error'); return; }
+      if (!data || !data.length) { showMsg('revMsg', 'Could not save — only admins can change the default price.', 'error'); return; }
+      defaultPrice = v;
+      document.getElementById('slPrice').value = v.toFixed(2);
+      showMsg('revMsg', 'Default price saved.', 'success');
+    };
 
     // ================= Pools =================
     document.getElementById('poolForm').onsubmit = async (e) => {

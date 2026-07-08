@@ -14,7 +14,7 @@
     </div>
   </nav>
 
-  <div class="container" style="padding-top: 28px; padding-bottom: 48px; max-width: 760px;">
+  <div class="container" style="padding-top: 28px; padding-bottom: 48px; max-width: 1080px;">
     <h1 style="margin-bottom: 4px;">Book a Lesson</h1>
     <p class="muted" style="margin-bottom: 20px;">Pick a time below — you'll just need a name, email, and phone number.</p>
 
@@ -31,9 +31,13 @@
         <h2 id="weekLabel"></h2>
         <button class="btn secondary small" id="nextWeek">Next &rarr;</button>
       </div>
-      <div class="row" style="margin-bottom: 16px;">
-        <select id="poolFilter"><option value="">All pools</option></select>
+      <div class="row" style="margin-bottom: 10px;">
+        <div><label for="poolFilter">Pool</label><select id="poolFilter"><option value="">All pools</option></select></div>
+        <div><label for="coachFilter">Coach</label><select id="coachFilter"><option value="">All coaches</option></select></div>
+        <div><label for="timeFrom">From</label><input type="time" id="timeFrom"></div>
+        <div><label for="timeTo">Until</label><input type="time" id="timeTo"></div>
       </div>
+      <div class="chips" id="dowChips" style="margin-bottom: 16px;"></div>
       <div class="msg" id="listMsg"></div>
       <div id="slotList"><p class="empty">Loading available times…</p></div>
     </div>
@@ -78,6 +82,7 @@
     let weekStart = startOfWeek(new Date());
     let selectedSlot = null;
     let pools = [];
+    let lastFetched = []; // slots for the current week (pool/coach filters applied server-side)
 
     function startOfWeek(d) {
       const x = new Date(d); x.setHours(0, 0, 0, 0);
@@ -103,6 +108,17 @@
       });
     }
 
+    async function loadCoaches() {
+      const { data, error } = await db.from('profiles')
+        .select('id, display_name').eq('is_public', true).order('display_name');
+      if (error) showMsg('listMsg', 'Could not load coaches: ' + error.message, 'error');
+      const sel = document.getElementById('coachFilter');
+      (data || []).forEach(p => {
+        const o = document.createElement('option');
+        o.value = p.id; o.textContent = p.display_name; sel.appendChild(o);
+      });
+    }
+
     async function loadSlots() {
       if (!db) return; // config error banner is already visible
       const list = document.getElementById('slotList');
@@ -113,13 +129,15 @@
         new Date(weekEnd - 1).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
       let q = db.from('slots')
-        .select('id, starts_at, duration_min, pool_id, pools(name), profiles!coach_id(display_name)')
+        .select('id, starts_at, duration_min, pool_id, coach_id, pools(name), profiles!coach_id(display_name)')
         .eq('status', 'open')
         .gte('starts_at', new Date(Math.max(weekStart, Date.now())).toISOString())
         .lt('starts_at', weekEnd.toISOString())
         .order('starts_at');
       const pf = document.getElementById('poolFilter').value;
       if (pf) q = q.eq('pool_id', pf);
+      const cf = document.getElementById('coachFilter').value;
+      if (cf) q = q.eq('coach_id', cf);
 
       const { data, error } = await q;
       if (error) {
@@ -127,31 +145,67 @@
         showMsg('listMsg', 'Could not load slots: ' + error.message, 'error');
         return;
       }
-      if (!data || !data.length) {
-        list.innerHTML = '<p class="empty">No open times this week — try another week or check back soon!</p>';
+      lastFetched = data || [];
+      renderWeek();
+    }
+
+    // ---- Day-of-week + time-of-day filters (applied instantly, no refetch) ----
+    function activeDows() {
+      return new Set([...document.querySelectorAll('#dowChips .chip.active')].map(c => +c.dataset.dow));
+    }
+    function toMins(t) { const [h, m] = t.split(':').map(Number); return h * 60 + m; }
+    function applyLocalFilters(slots) {
+      const days = activeDows();
+      const from = document.getElementById('timeFrom').value;
+      const to = document.getElementById('timeTo').value;
+      return slots.filter(s => {
+        const d = new Date(s.starts_at);
+        if (days.size && !days.has((d.getDay() + 6) % 7)) return false; // Mon=0
+        const mins = d.getHours() * 60 + d.getMinutes();
+        if (from && mins < toMins(from)) return false;
+        if (to && mins > toMins(to)) return false;
+        return true;
+      });
+    }
+    function bucketOf(d) { const h = d.getHours(); return h < 12 ? 'Morning' : h < 17 ? 'Afternoon' : 'Evening'; }
+
+    // ---- Weekly calendar: 7 day columns, stacked day list on phones ----
+    function renderWeek() {
+      const list = document.getElementById('slotList');
+      const slots = applyLocalFilters(lastFetched);
+      if (!slots.length) {
+        list.innerHTML = '<p class="empty">' + (lastFetched.length
+          ? 'No open times match your filters this week — try widening them or another week.'
+          : 'No open times this week — try another week or check back soon!') + '</p>';
         return;
       }
-
-      const byDay = {};
-      data.forEach(s => {
-        const key = new Date(s.starts_at).toDateString();
-        (byDay[key] = byDay[key] || []).push(s);
+      const byDay = Array.from({ length: 7 }, () => []);
+      slots.forEach(s => {
+        const idx = Math.round((new Date(s.starts_at).setHours(0, 0, 0, 0) - weekStart) / 86400000);
+        if (idx >= 0 && idx < 7) byDay[idx].push(s);
       });
+      list.innerHTML = '<div class="bcal">' + byDay.map((daySlots, i) => {
+        const d = new Date(weekStart); d.setDate(d.getDate() + i);
+        const isToday = d.toDateString() === new Date().toDateString();
+        let cards = '', lastBucket = null;
+        daySlots.forEach(s => {
+          const st = new Date(s.starts_at);
+          const b = bucketOf(st);
+          if (b !== lastBucket) { cards += `<div class="bcal-bucket">${b}</div>`; lastBucket = b; }
+          cards += `
+            <div class="slot-chip bcal-slot" data-id="${s.id}">
+              <div class="time">${fmtTime(st)}</div>
+              <div class="meta">${s.duration_min} min · ${esc(s.pools?.name || '')}${s.profiles ? '<br>Coach ' + esc(s.profiles.display_name) : ''}</div>
+            </div>`;
+        });
+        return `<div class="bcal-day ${daySlots.length ? '' : 'is-empty'}">
+          <div class="bcal-head ${isToday ? 'today' : ''}">${d.toLocaleDateString(undefined, { weekday: 'short' })} <span>${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span></div>
+          ${cards || '<div class="bcal-none">No times</div>'}
+        </div>`;
+      }).join('') + '</div>';
 
-      list.innerHTML = Object.entries(byDay).map(([day, slots]) => `
-        <div class="day-group">
-          <h3>${fmtDay(new Date(day))}</h3>
-          <div class="slot-grid">
-            ${slots.map(s => `
-              <div class="slot-chip" data-id="${s.id}">
-                <div class="time">${fmtTime(new Date(s.starts_at))} · ${s.duration_min} min</div>
-                <div class="meta">${esc(s.pools?.name || '')}${s.profiles ? ' · Coach ' + esc(s.profiles.display_name) : ''}</div>
-              </div>`).join('')}
-          </div>
-        </div>`).join('');
-
-      list.querySelectorAll('.slot-chip').forEach(chip => {
-        chip.onclick = () => openModal(data.find(s => s.id === chip.dataset.id));
+      list.querySelectorAll('.bcal-slot').forEach(chip => {
+        chip.onclick = () => openModal(lastFetched.find(s => s.id === chip.dataset.id));
       });
     }
 
@@ -206,10 +260,19 @@
 
     document.getElementById('prevWeek').onclick = () => { weekStart.setDate(weekStart.getDate() - 7); loadSlots(); };
     document.getElementById('nextWeek').onclick = () => { weekStart.setDate(weekStart.getDate() + 7); loadSlots(); };
+    // Pool/coach narrow the query; day/time chips just re-render the cached week
     document.getElementById('poolFilter').onchange = loadSlots;
+    document.getElementById('coachFilter').onchange = loadSlots;
+    document.getElementById('timeFrom').onchange = renderWeek;
+    document.getElementById('timeTo').onchange = renderWeek;
+    document.getElementById('dowChips').innerHTML =
+      ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d, i) =>
+        `<button type="button" class="chip" data-dow="${i}">${d}</button>`).join('');
+    document.querySelectorAll('#dowChips .chip').forEach(c =>
+      c.onclick = () => { c.classList.toggle('active'); renderWeek(); });
 
     if (db) {
-      loadPools().then(loadSlots).catch(e =>
+      Promise.all([loadPools(), loadCoaches()]).then(loadSlots).catch(e =>
         showMsg('listMsg', 'Could not reach Supabase: ' + e.message, 'error'));
     } else {
       document.getElementById('slotList').innerHTML =

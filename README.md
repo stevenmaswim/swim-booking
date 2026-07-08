@@ -13,6 +13,7 @@ A booking site with no payment infrastructure. Customers with the link book a le
 | `staff.html` | Staff dashboard (Google or email login, staff-only) |
 | `supabase/schema.sql` | Database, security rules, and booking logic |
 | `supabase/migration_google_auth.sql` | Google sign-in + staff allowlist (run after `schema.sql`) |
+| `supabase/migration_clients_revenue.sql` | Client CRM + admin-only revenue tracking (run last) |
 | `config.js` | Your Supabase keys go here |
 | `styles.css` | Shared styling |
 
@@ -22,16 +23,22 @@ A booking site with no payment infrastructure. Customers with the link book a le
 1. Go to [supabase.com](https://supabase.com) → sign up → **New project** (free tier). Pick a strong database password and a region near you.
 2. In the dashboard, open **SQL Editor** → **New query** → paste the entire contents of `supabase/schema.sql` → **Run**.
 3. Same again for `supabase/migration_google_auth.sql` → **Run**. This adds Google sign-in support and the staff allowlist.
-4. **Allowlist your staff.** Anyone with a Google account can *sign in*, but only emails in the `staff_emails` table can use the dashboard (enforced in the database, not just the UI). In the SQL Editor:
+4. Same again for `supabase/migration_clients_revenue.sql` → **Run**. This adds client tracking (CRM) and revenue reporting.
+5. **Allowlist your staff.** Anyone with a Google account can *sign in*, but only emails in the `staff_emails` table can use the dashboard (enforced in the database, not just the UI). In the SQL Editor:
    ```sql
    insert into public.staff_emails (email) values
      ('coach1@gmail.com'),
      ('coach2@gmail.com');
    ```
    Add each allowlisted email **before** the person's first sign-in if you can — their coach profile is then created automatically. (If they signed in first, no problem: the profile is created the next time they open the dashboard.)
-5. Keep **Authentication → Sign In / Up → "Allow new users to sign up" ENABLED.** Google sign-in needs it to create accounts on first login; the allowlist is what protects the dashboard and the data. (If you disabled this earlier, re-enable it.)
-6. (Optional) For staff who won't use Google: **Authentication → Users → Add user → Create new user** (email + password) — and add that same email to `staff_emails` too.
-7. Go to **Project Settings → API** (or “Data API”) and copy the **Project URL** and **anon public key**.
+6. **Promote yourself (or another user) to admin** to unlock the Revenue tab. Admins see revenue reports and set the default lesson price; coaches can't (the database refuses, not just the UI). Find the user's id under **Authentication → Users**, then in the SQL Editor:
+   ```sql
+   update public.profiles set role = 'admin' where id = '<user-uuid>';
+   ```
+   (The `role` column can only be changed here — it is not writable through the API.)
+7. Keep **Authentication → Sign In / Up → "Allow new users to sign up" ENABLED.** Google sign-in needs it to create accounts on first login; the allowlist is what protects the dashboard and the data. (If you disabled this earlier, re-enable it.)
+8. (Optional) For staff who won't use Google: **Authentication → Users → Add user → Create new user** (email + password) — and add that same email to `staff_emails` too.
+9. Go to **Project Settings → API** (or “Data API”) and copy the **Project URL** and **anon public key**.
 
 ### 2. Enable Google sign-in
 
@@ -78,8 +85,8 @@ Either way, share `<your-site>/book.html` in your WeChat group, and make sure `<
 ### 5. First run
 1. Open `/staff.html`, sign in with Google (or email), add your **pools** first.
 2. Each coach adds **availability** so the shared calendar shows who can teach when.
-3. Use **Publish Slots** to post bookable times (date, start time, length, how many back-to-back slots, pool, coach).
-4. Customers book on `/book.html`; booked slots vanish from the public page instantly.
+3. Use **Publish Slots** to post bookable times (date, start time, length, how many back-to-back slots, pool, coach, price — prefilled with the default an admin sets on the Revenue tab).
+4. Customers book on `/book.html` — a weekly calendar they can filter by pool, coach, day, and time of day. Booked slots vanish instantly. Every booking automatically creates/updates a client record in the **Clients** tab (searchable, with booking history and notes).
 
 ## How client data is protected
 
@@ -87,6 +94,8 @@ Either way, share `<your-site>/book.html` in your WeChat group, and make sure `<
 - **Booking happens only through a locked-down database function** that validates the email/phone, limits each email to 3 upcoming bookings (anti-spam), and uses a row lock + unique index so two people can never book the same slot, even clicking at the same instant.
 - **Cancellations use a private token** shown once after booking — no one can cancel (or discover) someone else's booking.
 - **Anyone can sign in with Google, but only allowlisted staff get access.** Every Row Level Security policy checks the signed-in email against the `staff_emails` table (via the `is_staff()` database function), so a random Google account can't read bookings or touch pools/slots/availability even by calling the API directly. The dashboard also signs such accounts out with "This account is not authorized as staff."
+- **Client records are staff-only.** The `clients` table has no anonymous access at all; rows are created only inside the `book_slot` function.
+- **Revenue is admins-only, enforced in the database.** Slot prices have no API read permission for anyone (column-level grants), and revenue comes only from `get_revenue_report()`, which raises an error unless the caller's profile has `role = 'admin'`. Coaches can set a price when publishing slots but can't read prices back in bulk, and the `role` column itself can't be written through the API.
 - Everything runs over HTTPS on Supabase/GitHub Pages/Netlify.
 
 ## Weekly routine
@@ -106,6 +115,8 @@ Every week: staff open **Publish Slots**, enter that week's times per pool, done
 - **"Could not load slots"** → check `config.js` values, and that `schema.sql` ran without errors.
 - **"This account is not authorized as staff"** → that email isn't in `staff_emails`. Add it in the SQL Editor (must match the Google account's email exactly, case doesn't matter).
 - **"Could not verify staff access"** → `supabase/migration_google_auth.sql` hasn't been run on this project.
+- **"Could not load settings" / empty Clients tab** → `supabase/migration_clients_revenue.sql` hasn't been run.
+- **No Revenue tab after signing in** → your profile isn't an admin yet; run the `update public.profiles set role='admin'…` SQL from setup step 1.6.
 - **Google button bounces back to the login page** → the page's URL isn't in **Authentication → URL Configuration → Additional Redirect URLs** (see step 2c), or the provider isn't enabled.
 - **Google says "redirect_uri_mismatch"** → the Supabase callback URL is missing from the Google Cloud OAuth client's Authorized redirect URIs (step 2a).
 - **New Google user can't sign in at all ("Signups not allowed")** → re-enable **Allow new users to sign up** (step 1.5); the allowlist is what keeps strangers out of the dashboard.
