@@ -10,13 +10,17 @@
   <nav>
     <div class="container">
       <a class="brand" href="index.html">&#127946; KSJ Swimming</a>
-      <div class="nav-links"><a href="index.html">Home</a></div>
+      <div class="nav-links">
+        <a href="index.html">Home</a>
+        <a href="mybookings.html">My Bookings</a>
+        <a href="mailto:ksjswimming@gmail.com">Contact Us</a>
+      </div>
     </div>
   </nav>
 
   <div class="container" style="padding-top: 28px; padding-bottom: 48px; max-width: 1080px;">
     <h1 style="margin-bottom: 4px;">Book a Lesson</h1>
-    <p class="muted" style="margin-bottom: 20px;">Pick a time below — you'll just need a name, email, and phone number.</p>
+    <p class="muted" style="margin-bottom: 20px;">Pick a time below — you'll just need first &amp; last name, a parent/guardian name, email, and phone number.</p>
 
     <div id="cancelPanel" class="card" style="display:none;">
       <h3>Cancel your booking</h3>
@@ -50,8 +54,14 @@
       <h3>Confirm your lesson</h3>
       <p class="muted" id="modalSlotInfo"></p>
       <form id="bookForm">
-        <label for="fName">Student name</label>
-        <input id="fName" required minlength="2" placeholder="Full name">
+        <div class="row">
+          <div><label for="fFirst">Student first name</label>
+            <input id="fFirst" required minlength="1" placeholder="First name"></div>
+          <div><label for="fLast">Student last name</label>
+            <input id="fLast" required minlength="1" placeholder="Last name"></div>
+        </div>
+        <label for="fParent">Parent/guardian name</label>
+        <input id="fParent" required minlength="2" placeholder="Parent or guardian full name">
         <label for="fEmail">Email</label>
         <input id="fEmail" type="email" required placeholder="you@example.com">
         <label for="fPhone">Phone</label>
@@ -76,6 +86,10 @@
       <button class="btn" style="margin-top: 16px;" onclick="location.href='book.html'">Done</button>
     </div>
   </div>
+
+  <footer>
+    <div class="container">KSJ Swimming — <a href="mybookings.html">My Bookings</a> · <a href="mailto:ksjswimming@gmail.com">Contact Us</a></div>
+  </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
@@ -130,7 +144,7 @@
         new Date(weekEnd - 1).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
       let q = db.from('slots')
-        .select('id, starts_at, duration_min, pool_id, coach_id, status, pools(name), profiles!coach_id(display_name, photo_url)')
+        .select('id, starts_at, duration_min, pool_id, coach_id, status, booked_by_display, pools(name), profiles!coach_id(display_name, photo_url)')
         .in('status', ['open', 'booked']) // booked stay visible, greyed out
         .gte('starts_at', new Date(Math.max(weekStart, Date.now())).toISOString())
         .lt('starts_at', weekEnd.toISOString())
@@ -194,10 +208,13 @@
           const b = bucketOf(st);
           if (b !== lastBucket) { cards += `<div class="bcal-bucket">${b}</div>`; lastBucket = b; }
           const isBooked = s.status === 'booked';
+          const coachName = s.profiles ? esc(s.profiles.display_name) : 'TBD';
+          const bookedBy = isBooked && s.booked_by_display
+            ? `<br><span class="muted">Booked by ${esc(s.booked_by_display)}</span>` : '';
           cards += `
             <div class="slot-chip bcal-slot${isBooked ? ' is-booked' : ''}"${isBooked ? '' : ` data-id="${s.id}"`}>
               <div class="time">${fmtTime(st)}${isBooked ? ' <span class="badge booked">Booked</span>' : ''}</div>
-              <div class="meta">${s.duration_min} min · ${esc(s.pools?.name || '')}${s.profiles ? '<br>Coach ' + esc(s.profiles.display_name) : ''}</div>
+              <div class="meta">${s.duration_min} min · ${esc(s.pools?.name || '')}<br>Coach ${coachName}${bookedBy}</div>
             </div>`;
         });
         return `<div class="bcal-day ${daySlots.length ? '' : 'is-empty'}">
@@ -233,20 +250,27 @@
       btn.disabled = true; btn.textContent = 'Booking…';
       const { data, error } = await db.rpc('book_slot', {
         p_slot_id: selectedSlot.id,
-        p_name: document.getElementById('fName').value,
+        p_first_name: document.getElementById('fFirst').value,
+        p_last_name: document.getElementById('fLast').value,
+        p_parent_name: document.getElementById('fParent').value,
         p_email: document.getElementById('fEmail').value,
         p_phone: document.getElementById('fPhone').value
       });
       btn.disabled = false; btn.textContent = 'Book this slot';
       if (error) { showMsg('bookMsg', error.message, 'error'); loadSlots(); return; }
 
+      // Fire off the confirmation email (best-effort — booking already succeeded)
+      db.functions.invoke('emails', { body: { type: 'confirmation', booking_id: data.booking_id } })
+        .catch(() => {});
+
       document.getElementById('bookModal').classList.remove('show');
       const d = new Date(data.starts_at);
       document.getElementById('doneInfo').textContent =
-        `${fmtDay(d)} at ${fmtTime(d)}. See you at the pool!`;
+        `${fmtDay(d)} at ${fmtTime(d)}. See you at the pool! A confirmation email is on its way.`;
       document.getElementById('cancelLink').value =
         location.origin + location.pathname + '?cancel=' + data.cancel_token;
       document.getElementById('doneModal').classList.add('show');
+      document.getElementById('bookForm').reset();
     };
 
     // Self-service cancellation via ?cancel=TOKEN

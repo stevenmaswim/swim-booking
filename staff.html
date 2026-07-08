@@ -58,7 +58,8 @@
         <h2 id="calLabel"></h2>
         <button class="btn secondary small" id="calNext">Next &rarr;</button>
       </div>
-      <p class="muted" style="margin-bottom:10px;"><span class="badge open">Green</span> = open slot, <span class="badge booked">Blue</span> = booked slot. Click a slot for details.</p>
+      <p class="muted" style="margin-bottom:8px;"><span class="badge open">Green</span> = open slot, <span class="badge booked">Blue</span> = booked slot. The left stripe shows the pool. Click a slot for details.</p>
+      <div id="poolLegend" style="margin-bottom:10px;"></div>
       <div class="cal-wrap"><div class="cal" id="calGrid"></div></div>
     </div>
 
@@ -119,7 +120,12 @@
           <div><label>Group by</label><select id="revPeriod">
             <option value="week" selected>Week</option>
             <option value="month">Month</option>
+            <option value="year">Year</option>
           </select></div>
+          <div><label>Year</label><select id="revYear"><option value="">All years</option></select></div>
+          <div><label>Coach</label><select id="revCoach"><option value="">All coaches</option></select></div>
+        </div>
+        <div class="row" style="align-items:flex-end; margin-top:8px;">
           <div><label>Default lesson price ($)</label><input type="number" id="defPrice" min="0" step="0.01"></div>
           <div><button class="btn secondary" id="saveDefPrice" type="button" style="margin-bottom:1px;">Save default</button></div>
         </div>
@@ -226,6 +232,11 @@
     let defaultPrice = 0, revChart = null;
     let calStart = startOfWeek(new Date());
     const DAY_START = 6, DAY_END = 22, HOUR_PX = 48;
+    const POOL_COLORS = ['#0ea5e9','#8b5cf6','#f59e0b','#10b981','#ef4444','#ec4899','#14b8a6','#f97316'];
+    function poolColor(poolId) {
+      const i = pools.findIndex(p => p.id === poolId);
+      return POOL_COLORS[(i < 0 ? 0 : i) % POOL_COLORS.length];
+    }
 
     function startOfWeek(d) {
       const x = new Date(d); x.setHours(0,0,0,0);
@@ -383,6 +394,12 @@
       if (sl.error)
         showMsg('dashMsg', 'Could not load the calendar: ' + sl.error.message, 'error');
 
+      // Pool colour legend (only pools that appear this week, plus all active)
+      document.getElementById('poolLegend').innerHTML = pools.filter(p => p.active).map(p =>
+        `<span style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;font-size:0.82rem;">
+          <span style="width:11px;height:11px;border-radius:3px;background:${poolColor(p.id)};display:inline-block;"></span>
+          ${esc(p.name)}</span>`).join('');
+
       const grid = document.getElementById('calGrid');
       let html = '<div class="head"></div>';
       const days = [];
@@ -420,7 +437,7 @@
         const startMin = st.getHours() * 60 + st.getMinutes();
         place(dayIdx, startMin, startMin + s.duration_min,
           s.status === 'open' ? 'slot-open' : 'slot-booked',
-          'left:40%;z-index:2;',
+          `left:40%;z-index:2;border-left-color:${poolColor(s.pool_id)};`,
           `${fmtTime(st)}<br>${esc(s.pools?.name || '')}`,
           `${s.status.toUpperCase()} — ${fmtTime(st)} ${s.pools?.name || ''}` +
           (s.profiles ? ' · ' + s.profiles.display_name : ''),
@@ -444,7 +461,7 @@
           .eq('slot_id', s.id).eq('status', 'confirmed').maybeSingle();
         if (data) bEl.innerHTML = `
           <div class="card" style="margin-top:12px; padding:14px; background:#f8fafc; box-shadow:none;">
-            <strong>${esc(data.student_name)}</strong><br>
+            <strong>${esc(data.student_name)}</strong>${data.parent_name ? ` <span class="muted">(parent: ${esc(data.parent_name)})</span>` : ''}<br>
             <span class="muted">&#9993; ${esc(data.email)}<br>&#128222; ${esc(data.phone)}</span>
           </div>`;
       }
@@ -581,12 +598,13 @@
       if (error) { showMsg('bookingsMsg', error.message, 'error'); return; }
       if (!data || !data.length) { el.innerHTML = '<p class="empty">No upcoming bookings yet.</p>'; return; }
       data.sort((a, b) => new Date(a.slots.starts_at) - new Date(b.slots.starts_at));
-      el.innerHTML = '<table><tr><th>Lesson</th><th>Pool</th><th>Coach</th><th>Student</th><th>Email</th><th>Phone</th><th></th></tr>' +
+      el.innerHTML = '<table><tr><th>Lesson</th><th>Pool</th><th>Coach</th><th>Student</th><th>Parent/guardian</th><th>Email</th><th>Phone</th><th></th></tr>' +
         data.map(b => `<tr>
           <td>${fmtDT(new Date(b.slots.starts_at))}</td>
           <td>${esc(b.slots.pools?.name || '')}</td>
           <td>${esc(b.slots.profiles?.display_name || '—')}</td>
           <td>${esc(b.student_name)}</td>
+          <td>${esc(b.parent_name || '—')}</td>
           <td><a href="mailto:${esc(b.email)}">${esc(b.email)}</a></td>
           <td><a href="tel:${esc(b.phone)}">${esc(b.phone)}</a></td>
           <td>${(isAdmin || b.slots.coach_id === me.id)
@@ -656,7 +674,8 @@
       if (!c) return;
       const s = clientStats[c.id] || { lessons: 0, cancelled: 0, last: null };
       document.getElementById('cmName').textContent = c.name;
-      document.getElementById('cmContact').textContent = c.email + (c.phone ? ' · ' + c.phone : '');
+      document.getElementById('cmContact').textContent = c.email + (c.phone ? ' · ' + c.phone : '') +
+        (c.parent_name ? ' · Parent/guardian: ' + c.parent_name : '');
       document.getElementById('cmStats').textContent =
         `${s.lessons} lesson${s.lessons === 1 ? '' : 's'} · ${s.cancelled} cancelled · client since ${new Date(c.created_at).toLocaleDateString()}`;
       document.getElementById('cmNotes').value = c.notes || '';
@@ -708,17 +727,37 @@
     // The database is the real gate: get_revenue_report() raises an
     // exception for non-admins, and the slots.price column has no API
     // read grant — this tab is just presentation.
+    let revCoachFilled = false;
     async function loadRevenue() {
       if (!isAdmin) return;
+      // Populate the coach filter once (from the coaches we already have)
+      if (!revCoachFilled) {
+        const cs = document.getElementById('revCoach');
+        coaches.forEach(c => cs.insertAdjacentHTML('beforeend', `<option value="${c.id}">${esc(c.display_name)}</option>`));
+        revCoachFilled = true;
+      }
       const period = document.getElementById('revPeriod').value;
+      const year = document.getElementById('revYear').value;
+      const coachId = document.getElementById('revCoach').value;
       document.getElementById('revPeriodTitle').textContent = 'By ' + period;
-      const { data, error } = await db.rpc('get_revenue_report', { p_period: period });
+      const { data, error } = await db.rpc('get_revenue_report', {
+        p_period: period,
+        p_year: year ? parseInt(year) : null,
+        p_coach_id: coachId || null
+      });
       if (error) { showMsg('revMsg', 'Could not load revenue: ' + error.message, 'error'); return; }
+      // Fill the year picker from the data (preserve current selection)
+      const ys = document.getElementById('revYear');
+      const cur = ys.value;
+      ys.innerHTML = '<option value="">All years</option>' +
+        (data.years || []).map(y => `<option value="${y}">${y}</option>`).join('');
+      ys.value = cur;
       renderRevenue(data, period);
     }
     function money(x) { return '$' + Number(x || 0).toFixed(2); }
     function fmtPeriod(iso, period) {
       const d = new Date(iso);
+      if (period === 'year') return String(d.getFullYear());
       return period === 'month'
         ? d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
         : 'Week of ' + d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
@@ -731,7 +770,8 @@
         : `<table><tr><th>${nameLabel}</th><th>Lessons</th><th>Revenue</th></tr>` +
           rows.map(x => `<tr><td>${nameKey === 'period' ? fmtPeriod(x.period, period) : esc(x[nameKey])}</td>
             <td>${x.lessons}</td><td>${money(x.revenue)}</td></tr>`).join('') + '</table>';
-      document.getElementById('revByPeriod').innerHTML = tbl(r.by_period || [], 'period', period === 'month' ? 'Month' : 'Week');
+      document.getElementById('revByPeriod').innerHTML = tbl(r.by_period || [], 'period',
+        period === 'month' ? 'Month' : period === 'year' ? 'Year' : 'Week');
       document.getElementById('revByCoach').innerHTML = tbl(r.by_coach || [], 'coach', 'Coach');
       document.getElementById('revByPool').innerHTML = tbl(r.by_pool || [], 'pool', 'Pool');
 
@@ -749,6 +789,8 @@
       });
     }
     document.getElementById('revPeriod').onchange = loadRevenue;
+    document.getElementById('revYear').onchange = loadRevenue;
+    document.getElementById('revCoach').onchange = loadRevenue;
     document.getElementById('saveDefPrice').onclick = async () => {
       const v = parseFloat(document.getElementById('defPrice').value);
       if (!(v >= 0)) { showMsg('revMsg', 'Enter a valid default price.', 'error'); return; }

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Bookings — KSJ Swimming</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <nav>
+    <div class="container">
+      <a class="brand" href="index.html">&#127946; KSJ Swimming</a>
+      <div class="nav-links">
+        <a href="index.html">Home</a>
+        <a href="book.html">Book a Lesson</a>
+        <a href="mailto:ksjswimming@gmail.com">Contact Us</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container" style="padding-top: 28px; padding-bottom: 48px; max-width: 760px;">
+    <h1 style="margin-bottom: 4px;">My Bookings</h1>
+    <p class="muted" style="margin-bottom: 20px;">Enter the email you booked with and we'll send you a 6-digit code to view your lessons.</p>
+
+    <!-- Step 1: request code -->
+    <div class="card" id="emailCard">
+      <label for="mbEmail">Email</label>
+      <input id="mbEmail" type="email" required placeholder="you@example.com">
+      <div class="msg" id="emailMsg"></div>
+      <button class="btn" id="sendCodeBtn" style="margin-top:14px;">Send me a code</button>
+    </div>
+
+    <!-- Step 2: verify code -->
+    <div class="card" id="codeCard" style="display:none;">
+      <label for="mbCode">6-digit code</label>
+      <input id="mbCode" inputmode="numeric" maxlength="6" placeholder="123456" style="letter-spacing:4px; font-size:1.1rem;">
+      <div class="msg" id="codeMsg"></div>
+      <div class="row" style="margin-top:14px;">
+        <button class="btn secondary" id="backBtn" type="button">Use a different email</button>
+        <button class="btn" id="verifyBtn">View my bookings</button>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div id="results" style="display:none;">
+      <h2 style="margin:24px 0 12px;">Upcoming lessons</h2>
+      <div id="upcomingList"><p class="empty">Loading…</p></div>
+      <h2 style="margin:24px 0 12px;">Past &amp; cancelled</h2>
+      <div id="pastList"></div>
+    </div>
+  </div>
+
+  <footer>
+    <div class="container">KSJ Swimming — <a href="book.html">Book a Lesson</a> · <a href="mailto:ksjswimming@gmail.com">Contact Us</a></div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script>
+    let verifiedEmail = '', verifiedCode = '';
+
+    function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+    function showMsg(id, text, type) {
+      const el = document.getElementById(id);
+      el.textContent = text; el.className = 'msg show ' + type;
+    }
+    function fmtWhen(iso) {
+      return new Date(iso).toLocaleString(undefined, {
+        weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+      });
+    }
+
+    async function sendCode() {
+      const email = document.getElementById('mbEmail').value.trim();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+        showMsg('emailMsg', 'Please enter a valid email address.', 'error'); return;
+      }
+      const btn = document.getElementById('sendCodeBtn');
+      btn.disabled = true; btn.textContent = 'Sending…';
+      const { error } = await db.functions.invoke('emails', { body: { type: 'otp', email } });
+      btn.disabled = false; btn.textContent = 'Send me a code';
+      if (error) {
+        showMsg('emailMsg', 'Could not send a code: ' + (error.message || error) + '. If this keeps happening the email service may not be set up yet.', 'error');
+        return;
+      }
+      verifiedEmail = email;
+      document.getElementById('codeCard').style.display = 'block';
+      document.getElementById('mbCode').focus();
+      showMsg('emailMsg', 'Code sent — check your inbox (and spam).', 'success');
+    }
+
+    async function verifyCode() {
+      const code = document.getElementById('mbCode').value.trim();
+      if (!/^\d{6}$/.test(code)) { showMsg('codeMsg', 'Enter the 6-digit code from your email.', 'error'); return; }
+      const btn = document.getElementById('verifyBtn');
+      btn.disabled = true; btn.textContent = 'Checking…';
+      const { data, error } = await db.rpc('verify_and_list_bookings', { p_email: verifiedEmail, p_code: code });
+      btn.disabled = false; btn.textContent = 'View my bookings';
+      if (error) { showMsg('codeMsg', error.message, 'error'); return; }
+      verifiedCode = code;
+      renderBookings(data.bookings || []);
+    }
+
+    async function refresh() {
+      const { data, error } = await db.rpc('verify_and_list_bookings', { p_email: verifiedEmail, p_code: verifiedCode });
+      if (!error) renderBookings(data.bookings || []);
+    }
+
+    function renderBookings(bookings) {
+      document.getElementById('emailCard').style.display = 'none';
+      document.getElementById('codeCard').style.display = 'none';
+      document.getElementById('results').style.display = 'block';
+      const now = Date.now();
+      const upcoming = bookings.filter(b => b.status === 'confirmed' && new Date(b.starts_at).getTime() > now)
+        .sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
+      const past = bookings.filter(b => !(b.status === 'confirmed' && new Date(b.starts_at).getTime() > now));
+
+      const up = document.getElementById('upcomingList');
+      if (!upcoming.length) { up.innerHTML = '<p class="empty">No upcoming lessons. <a href="book.html">Book one →</a></p>'; }
+      else up.innerHTML = upcoming.map(b => card(b, true)).join('');
+
+      const pl = document.getElementById('pastList');
+      pl.innerHTML = past.length ? past.map(b => card(b, false)).join('') : '<p class="empty">Nothing here yet.</p>';
+
+      up.querySelectorAll('[data-cancel]').forEach(btn => btn.onclick = async () => {
+        if (!confirm('Cancel this lesson? The spot will be reopened.')) return;
+        const { error } = await db.rpc('cancel_booking', { p_token: btn.dataset.cancel });
+        if (error) { alert('Could not cancel: ' + error.message); return; }
+        refresh();
+      });
+    }
+
+    function card(b, cancellable) {
+      const cancelled = b.status !== 'confirmed';
+      return `<div class="card" style="${cancelled ? 'opacity:0.7;' : ''}">
+        <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+          <div>
+            <strong>${esc(fmtWhen(b.starts_at))}</strong> · ${b.duration_min} min
+            ${cancelled ? '<span class="badge cancelled">cancelled</span>' : ''}
+            <div class="muted">${esc(b.pool_name || '')}${b.pool_address ? ' — ' + esc(b.pool_address) : ''}</div>
+            <div class="muted">Coach ${esc(b.coach || 'TBD')} · Student ${esc(b.first_name || b.student_name || '')}</div>
+          </div>
+          ${cancellable ? `<button class="btn small danger" data-cancel="${esc(b.cancel_token)}" style="align-self:flex-start;">Cancel</button>` : ''}
+        </div>
+      </div>`;
+    }
+
+    document.getElementById('sendCodeBtn').onclick = sendCode;
+    document.getElementById('verifyBtn').onclick = verifyCode;
+    document.getElementById('backBtn').onclick = () => {
+      document.getElementById('codeCard').style.display = 'none';
+      document.getElementById('mbCode').value = '';
+    };
+    document.getElementById('mbEmail').addEventListener('keydown', e => { if (e.key === 'Enter') sendCode(); });
+    document.getElementById('mbCode').addEventListener('keydown', e => { if (e.key === 'Enter') verifyCode(); });
+
+    if (!db) {
+      document.getElementById('sendCodeBtn').disabled = true;
+      showMsg('emailMsg', 'This site is not connected to Supabase yet — see the banner above.', 'error');
+    }
+  </script>
+</body>
+</html>
