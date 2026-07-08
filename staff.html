@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
   <title>Staff — KSJ Swimming</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -45,6 +46,7 @@
       <button data-tab="calendar" class="active">&#128197; Calendar</button>
       <button data-tab="slots">&#10133; Publish Slots</button>
       <button data-tab="bookings">&#128203; Bookings</button>
+      <button data-tab="history">&#128198; History</button>
       <button data-tab="clients">&#128101; Clients</button>
       <button data-tab="pools">&#128205; Pools</button>
       <button data-tab="me">&#128100; My Profile</button>
@@ -98,6 +100,55 @@
         <h3>Upcoming bookings</h3>
         <div class="msg" id="bookingsMsg"></div>
         <div style="overflow-x:auto;"><div id="bookingsList"><p class="empty">Loading…</p></div></div>
+      </div>
+      <div class="card">
+        <h3>Export to CSV</h3>
+        <p class="muted">Download all slots in a date range (SignUpGenius-compatible). Unbooked slots are included as blank rows.</p>
+        <div class="row" style="align-items:flex-end;">
+          <div><label>Range</label><select id="bkRange">
+            <option value="this-week">This week</option>
+            <option value="last-week">Last week</option>
+            <option value="this-month" selected>This month</option>
+            <option value="last-month">Last month</option>
+            <option value="custom">Custom…</option>
+          </select></div>
+          <div class="bkCustom" style="display:none;"><label>From</label><input type="date" id="bkFrom"></div>
+          <div class="bkCustom" style="display:none;"><label>To</label><input type="date" id="bkTo"></div>
+          <div><button class="btn" id="bkExport" type="button">&#11015; Download CSV</button></div>
+        </div>
+        <div class="msg" id="bkExportMsg"></div>
+      </div>
+    </div>
+
+    <!-- History tab -->
+    <div id="tab-history" style="display:none;">
+      <div class="card">
+        <h3>History</h3>
+        <p class="muted">Past lessons, including cancelled ones. Newest first.</p>
+        <div class="row" style="align-items:flex-end;">
+          <div><label>Range</label><select id="hxRange">
+            <option value="this-month">This month</option>
+            <option value="last-month">Last month</option>
+            <option value="last-3-months" selected>Last 3 months</option>
+            <option value="this-year">This year</option>
+            <option value="custom">Custom…</option>
+          </select></div>
+          <div class="hxCustom" style="display:none;"><label>From</label><input type="date" id="hxFrom"></div>
+          <div class="hxCustom" style="display:none;"><label>To</label><input type="date" id="hxTo"></div>
+          <div><label>Coach</label><select id="hxCoach"><option value="">All coaches</option></select></div>
+          <div><label>Pool</label><select id="hxPool"><option value="">All pools</option></select></div>
+        </div>
+        <div class="row" style="align-items:flex-end; margin-top:8px;">
+          <div><button class="btn secondary" id="hxApply" type="button">Apply filters</button></div>
+          <div><button class="btn" id="hxExport" type="button">&#11015; Download CSV</button></div>
+        </div>
+        <div class="msg" id="hxMsg"></div>
+        <div style="overflow-x:auto;"><div id="hxList"><p class="empty">Choose a range and Apply.</p></div></div>
+        <div class="bulkbar" id="hxPager" style="display:none; justify-content:space-between;">
+          <button class="btn small secondary" id="hxPrev">&larr; Prev</button>
+          <span class="muted" id="hxPageInfo"></span>
+          <button class="btn small secondary" id="hxNext">Next &rarr;</button>
+        </div>
       </div>
     </div>
 
@@ -199,8 +250,38 @@
       <div id="smBooking"></div>
       <div class="row" style="margin-top: 18px;">
         <button class="btn secondary" onclick="document.getElementById('slotModal').classList.remove('show')">Close</button>
+        <button class="btn" id="smEdit" style="display:none;">Edit</button>
         <button class="btn danger" id="smDelete">Cancel slot</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Edit slot modal -->
+  <div class="modal-backdrop" id="editModal">
+    <div class="modal">
+      <h3>Edit slot</h3>
+      <div class="msg error show" id="edBookedWarn" style="display:none;">This lesson is booked — the client will be emailed about the change.</div>
+      <form id="editForm">
+        <div class="row">
+          <div><label>Date</label><input type="date" id="edDate" required></div>
+          <div><label>Start time</label><input type="time" id="edStart" required></div>
+        </div>
+        <div class="row">
+          <div><label>Length (min)</label><select id="edDur">
+            <option>30</option><option>45</option><option>60</option><option>90</option>
+          </select></div>
+          <div><label>Price ($)</label><input type="number" id="edPrice" min="0" step="0.01" required></div>
+        </div>
+        <div class="row">
+          <div><label>Pool</label><select id="edPool" required></select></div>
+          <div><label>Coach</label><select id="edCoach"><option value="">Unassigned</option></select></div>
+        </div>
+        <div class="msg" id="edMsg"></div>
+        <div class="row" style="margin-top:16px;">
+          <button type="button" class="btn secondary" id="edCancel">Back</button>
+          <button type="submit" class="btn" id="edSave">Save changes</button>
+        </div>
+      </form>
     </div>
   </div>
 
@@ -374,9 +455,10 @@
     document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
       document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
-      ['calendar','slots','bookings','clients','pools','me','revenue'].forEach(t =>
+      ['calendar','slots','bookings','history','clients','pools','me','revenue'].forEach(t =>
         document.getElementById('tab-' + t).style.display = (t === b.dataset.tab) ? 'block' : 'none');
       if (b.dataset.tab === 'revenue') loadRevenue();
+      if (b.dataset.tab === 'history') initHistory();
     });
 
     // ================= Calendar =================
@@ -465,9 +547,12 @@
             <span class="muted">&#9993; ${esc(data.email)}<br>&#128222; ${esc(data.phone)}</span>
           </div>`;
       }
-      // Coaches may only cancel their own slots; admins any (DB enforces too)
-      document.getElementById('smDelete').style.display =
-        (isAdmin || s.coach_id === me.id) ? '' : 'none';
+      // Coaches may only cancel/edit their own slots; admins any (DB enforces too)
+      const canManage = isAdmin || s.coach_id === me.id;
+      const smEdit = document.getElementById('smEdit');
+      smEdit.style.display = canManage ? '' : 'none';
+      smEdit.onclick = () => { document.getElementById('slotModal').classList.remove('show'); openEditModal(s.id); };
+      document.getElementById('smDelete').style.display = canManage ? '' : 'none';
       document.getElementById('smDelete').onclick = async () => {
         if (!confirm(s.status === 'booked'
           ? 'This slot is BOOKED. Cancelling removes the booking too. Continue?'
@@ -565,9 +650,11 @@
           <td>${esc(s.pools?.name || '')}</td>
           <td>${esc(s.profiles?.display_name || '—')}</td>
           <td><span class="badge ${s.status}">${s.status}</span></td>
-          <td>${can ? `<button class="btn small danger" data-cancel="${s.id}" data-status="${s.status}">Cancel</button>` : ''}</td>
+          <td style="white-space:nowrap;">${can ? `<button class="btn small secondary" data-edit="${s.id}">Edit</button>
+            <button class="btn small danger" data-cancel="${s.id}" data-status="${s.status}">Cancel</button>` : ''}</td>
         </tr>`;
         }).join('') + '</table>';
+      el.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openEditModal(b.dataset.edit));
 
       const rowSels = () => Array.from(el.querySelectorAll('.rowSel'));
       const checked = () => rowSels().filter(c => c.checked);
@@ -916,6 +1003,223 @@
       showMsg('meMsg', 'Profile saved.', 'success');
       await loadBaseData();
       document.getElementById('whoami').textContent = myProfile.display_name;
+    };
+
+    // ================= CSV export (SignUpGenius-compatible) =================
+    const TIMEZONE = 'America/Vancouver'; // business local time for the CSV
+    function csvDateTime(d) {
+      if (!d) return '';
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: true
+      }).formatToParts(new Date(d));
+      const g = t => (parts.find(x => x.type === t) || {}).value || '';
+      return `${g('month')}/${g('day')}/${g('year')} ${g('hour')}:${g('minute')} ${g('dayPeriod')}`;
+    }
+    function csvField(s) { return '"' + String(s == null ? '' : s).replace(/"/g, '""') + '"'; }
+    function csvRow(fields) { return fields.map(csvField).join(',') + ','; } // trailing comma per line
+    const CSV_HEADER = '"Start Date/Time (mm/dd/yyyy)","End Date/Time (mm/dd/yyyy)","Location","Qty","Item","First Name","Last Name","Email","Sign Up Comment","Sign Up Timestamp","Phone","PhoneType",';
+    const CSV_FOOTER = '* Sign Ups with no Time Zone';
+    function pickBooking(slot, includeCancelled) {
+      const bs = slot.bookings || [];
+      const confirmed = bs.find(b => b.status === 'confirmed');
+      if (confirmed) return { b: confirmed, cancelled: false };
+      if (includeCancelled) {
+        const c = bs.filter(b => b.status === 'cancelled')
+          .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+        if (c) return { b: c, cancelled: true };
+      }
+      return { b: null, cancelled: false };
+    }
+    function buildCsv(slots, includeCancelled) {
+      const rows = slots.slice().sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
+      const lines = [CSV_HEADER];
+      for (const s of rows) {
+        const start = new Date(s.starts_at);
+        const end = new Date(start.getTime() + (s.duration_min || 0) * 60000);
+        const loc = (s.pools && (s.pools.address || s.pools.name)) || '';
+        const item = (s.profiles && s.profiles.display_name) || '';
+        const { b, cancelled } = pickBooking(s, includeCancelled);
+        let comment = b ? (b.parent_name || '') : '';
+        if (cancelled) comment = 'CANCELLED' + (comment ? ' ' + comment : '');
+        const phone = b ? (b.phone || '') : '';
+        lines.push(csvRow([
+          csvDateTime(start), csvDateTime(end), loc, '1', item,
+          b ? (b.first_name || '') : '', b ? (b.last_name || '') : '', b ? (b.email || '') : '',
+          comment, b ? csvDateTime(b.created_at) : '', phone, phone ? 'Mobile' : ''
+        ]));
+      }
+      lines.push(CSV_FOOTER);
+      return '﻿' + lines.join('\r\n'); // BOM so Excel reads UTF-8 (accented/Chinese names)
+    }
+    function downloadCsv(filename, text) {
+      const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+    function ymd(d) {
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+    function dayStart(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
+    function dayEnd(d) { const x = new Date(d); x.setHours(23, 59, 59, 999); return x; }
+    function presetRange(name, fromVal, toVal) {
+      const now = new Date();
+      const y = now.getFullYear(), m = now.getMonth();
+      if (name === 'custom')
+        return { start: dayStart(new Date((fromVal || ymd(now)) + 'T00:00')), end: dayEnd(new Date((toVal || ymd(now)) + 'T00:00')) };
+      if (name === 'this-week') { const s = startOfWeek(now); return { start: dayStart(s), end: dayEnd(new Date(s.getTime() + 6 * 86400000)) }; }
+      if (name === 'last-week') { const s = startOfWeek(now); s.setDate(s.getDate() - 7); return { start: dayStart(s), end: dayEnd(new Date(s.getTime() + 6 * 86400000)) }; }
+      if (name === 'this-month') return { start: dayStart(new Date(y, m, 1)), end: dayEnd(new Date(y, m + 1, 0)) };
+      if (name === 'last-month') return { start: dayStart(new Date(y, m - 1, 1)), end: dayEnd(new Date(y, m, 0)) };
+      if (name === 'last-3-months') return { start: dayStart(new Date(y, m - 3, now.getDate())), end: dayEnd(now) };
+      if (name === 'this-year') return { start: dayStart(new Date(y, 0, 1)), end: dayEnd(new Date(y, 11, 31)) };
+      return { start: dayStart(now), end: dayEnd(now) };
+    }
+    async function fetchRangeSlots({ start, end, coachId, poolId, includeCancelled }) {
+      let q = db.from('slots')
+        .select('id, starts_at, duration_min, status, pool_id, coach_id, pools(name,address), profiles!coach_id(display_name), bookings(first_name,last_name,email,phone,parent_name,created_at,status)')
+        .gte('starts_at', start.toISOString()).lte('starts_at', end.toISOString())
+        .order('starts_at', { ascending: false }).limit(5000);
+      if (!includeCancelled) q = q.neq('status', 'cancelled');
+      if (coachId) q = q.eq('coach_id', coachId);
+      if (poolId) q = q.eq('pool_id', poolId);
+      return await q;
+    }
+
+    // ---- Bookings-tab export ----
+    document.getElementById('bkRange').onchange = () => {
+      const c = document.getElementById('bkRange').value === 'custom';
+      document.querySelectorAll('.bkCustom').forEach(e => e.style.display = c ? '' : 'none');
+    };
+    document.getElementById('bkExport').onclick = async () => {
+      const { start, end } = presetRange(document.getElementById('bkRange').value,
+        document.getElementById('bkFrom').value, document.getElementById('bkTo').value);
+      showMsg('bkExportMsg', 'Preparing…', 'success');
+      const { data, error } = await fetchRangeSlots({ start, end, includeCancelled: false });
+      if (error) { showMsg('bkExportMsg', 'Export failed: ' + error.message, 'error'); return; }
+      downloadCsv(`ksj-lessons-${ymd(start)}_to_${ymd(end)}.csv`, buildCsv(data || [], false));
+      showMsg('bkExportMsg', `Exported ${(data || []).length} slot${(data || []).length === 1 ? '' : 's'}.`, 'success');
+    };
+
+    // ================= History tab =================
+    let hxRows = [], hxPage = 0, hxFilled = false;
+    const HX_PER = 50;
+    function initHistory() {
+      if (hxFilled) return;
+      const cs = document.getElementById('hxCoach'), ps = document.getElementById('hxPool');
+      coaches.forEach(c => cs.insertAdjacentHTML('beforeend', `<option value="${c.id}">${esc(c.display_name)}</option>`));
+      pools.forEach(p => ps.insertAdjacentHTML('beforeend', `<option value="${p.id}">${esc(p.name)}</option>`));
+      hxFilled = true;
+    }
+    document.getElementById('hxRange').onchange = () => {
+      const c = document.getElementById('hxRange').value === 'custom';
+      document.querySelectorAll('.hxCustom').forEach(e => e.style.display = c ? '' : 'none');
+    };
+    function hxRange() {
+      return presetRange(document.getElementById('hxRange').value,
+        document.getElementById('hxFrom').value, document.getElementById('hxTo').value);
+    }
+    async function loadHistory() {
+      const { start, end } = hxRange();
+      const coachId = document.getElementById('hxCoach').value, poolId = document.getElementById('hxPool').value;
+      document.getElementById('hxList').innerHTML = '<p class="empty">Loading…</p>';
+      const { data, error } = await fetchRangeSlots({ start, end, coachId, poolId, includeCancelled: true });
+      if (error) { document.getElementById('hxList').innerHTML = ''; showMsg('hxMsg', 'Could not load history: ' + error.message, 'error'); return; }
+      hxRows = data || []; hxPage = 0; renderHistory();
+    }
+    function renderHistory() {
+      const el = document.getElementById('hxList');
+      if (!hxRows.length) { el.innerHTML = '<p class="empty">No lessons in this range.</p>'; document.getElementById('hxPager').style.display = 'none'; return; }
+      const pages = Math.ceil(hxRows.length / HX_PER);
+      hxPage = Math.min(hxPage, pages - 1);
+      const slice = hxRows.slice(hxPage * HX_PER, hxPage * HX_PER + HX_PER);
+      el.innerHTML = '<table><tr><th>When</th><th>Pool</th><th>Coach</th><th>Student</th><th>Status</th></tr>' +
+        slice.map(s => {
+          const b = (s.bookings || []).find(x => x.status === 'confirmed') ||
+            (s.bookings || []).filter(x => x.status === 'cancelled').sort((a, c) => new Date(c.created_at) - new Date(a.created_at))[0];
+          const who = b ? ((b.first_name || '') + ' ' + (b.last_name || '')).trim() : '';
+          return `<tr>
+            <td>${fmtDT(new Date(s.starts_at))} (${s.duration_min}m)</td>
+            <td>${esc(s.pools?.name || '')}</td>
+            <td>${esc(s.profiles?.display_name || '—')}</td>
+            <td>${esc(who) || '—'}</td>
+            <td><span class="badge ${s.status === 'booked' ? 'booked' : s.status === 'cancelled' ? 'cancelled' : 'open'}">${esc(s.status)}</span></td>
+          </tr>`;
+        }).join('') + '</table>';
+      const pager = document.getElementById('hxPager');
+      pager.style.display = pages > 1 ? 'flex' : 'none';
+      document.getElementById('hxPageInfo').textContent = `Page ${hxPage + 1} of ${pages} · ${hxRows.length} lessons`;
+      document.getElementById('hxPrev').disabled = hxPage === 0;
+      document.getElementById('hxNext').disabled = hxPage >= pages - 1;
+    }
+    document.getElementById('hxApply').onclick = loadHistory;
+    document.getElementById('hxPrev').onclick = () => { if (hxPage > 0) { hxPage--; renderHistory(); } };
+    document.getElementById('hxNext').onclick = () => { hxPage++; renderHistory(); };
+    document.getElementById('hxExport').onclick = async () => {
+      const { start, end } = hxRange();
+      const coachId = document.getElementById('hxCoach').value, poolId = document.getElementById('hxPool').value;
+      showMsg('hxMsg', 'Preparing…', 'success');
+      const { data, error } = await fetchRangeSlots({ start, end, coachId, poolId, includeCancelled: true });
+      if (error) { showMsg('hxMsg', 'Export failed: ' + error.message, 'error'); return; }
+      downloadCsv(`ksj-lessons-${ymd(start)}_to_${ymd(end)}.csv`, buildCsv(data || [], true));
+      showMsg('hxMsg', `Exported ${(data || []).length} slot${(data || []).length === 1 ? '' : 's'}.`, 'success');
+    };
+
+    // ================= Edit slot =================
+    let edSlotId = null, edOld = null;
+    async function openEditModal(slotId) {
+      edSlotId = slotId;
+      document.getElementById('edMsg').className = 'msg';
+      const { data, error } = await db.rpc('get_slot_for_edit', { p_slot_id: slotId });
+      if (error) { alert('Cannot edit this slot: ' + error.message); return; }
+      const poolSel = document.getElementById('edPool'); poolSel.innerHTML = '';
+      pools.filter(p => p.active || p.id === data.pool_id).forEach(p =>
+        poolSel.insertAdjacentHTML('beforeend', `<option value="${p.id}">${esc(p.name)}</option>`));
+      const coachSel = document.getElementById('edCoach'); coachSel.innerHTML = '<option value="">Unassigned</option>';
+      coaches.forEach(c => coachSel.insertAdjacentHTML('beforeend', `<option value="${c.id}">${esc(c.display_name)}</option>`));
+      const st = new Date(data.starts_at);
+      document.getElementById('edDate').value = ymd(st);
+      document.getElementById('edStart').value = String(st.getHours()).padStart(2, '0') + ':' + String(st.getMinutes()).padStart(2, '0');
+      const durSel = document.getElementById('edDur');
+      if (![...durSel.options].some(o => o.value == String(data.duration_min)))
+        durSel.insertAdjacentHTML('beforeend', `<option>${data.duration_min}</option>`);
+      durSel.value = String(data.duration_min);
+      document.getElementById('edPrice').value = Number(data.price).toFixed(2);
+      poolSel.value = data.pool_id;
+      coachSel.value = data.coach_id || '';
+      const poolObj = pools.find(p => p.id === data.pool_id);
+      edOld = { starts_at: data.starts_at, location: poolObj ? (poolObj.address || poolObj.name) : '' };
+      document.getElementById('edBookedWarn').style.display = data.booking ? 'block' : 'none';
+      document.getElementById('editModal').classList.add('show');
+    }
+    document.getElementById('edCancel').onclick = () => document.getElementById('editModal').classList.remove('show');
+    document.getElementById('editForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const starts = new Date(document.getElementById('edDate').value + 'T' + document.getElementById('edStart').value);
+      if (isNaN(starts)) { showMsg('edMsg', 'Please enter a valid date and time.', 'error'); return; }
+      const btn = document.getElementById('edSave'); btn.disabled = true; btn.textContent = 'Saving…';
+      const { data, error } = await db.rpc('edit_slot', {
+        p_slot_id: edSlotId,
+        p_starts_at: starts.toISOString(),
+        p_duration_min: parseInt(document.getElementById('edDur').value),
+        p_pool_id: document.getElementById('edPool').value,
+        p_coach_id: document.getElementById('edCoach').value || null,
+        p_price: parseFloat(document.getElementById('edPrice').value)
+      });
+      btn.disabled = false; btn.textContent = 'Save changes';
+      if (error) { showMsg('edMsg', error.message, 'error'); return; }
+      if (data && data.booking) {
+        db.functions.invoke('emails', { body: {
+          type: 'slot_update', booking_id: data.booking.id,
+          old_start: edOld.starts_at, old_location: edOld.location
+        } }).catch(() => {});
+      }
+      document.getElementById('editModal').classList.remove('show');
+      renderCalendar(); loadSlotAdmin(); loadBookings();
+      showMsg('dashMsg', 'Slot updated.' + (data && data.booking ? ' The client has been emailed about the change.' : ''), 'success');
     };
 
     init();

@@ -85,17 +85,31 @@ function shell(inner: string): string {
 }
 
 // ---------- OTP ----------
+// Two rate limits protect against inbox-bombing a single address AND
+// against draining the shared daily email quota across many addresses.
+const OTP_PER_EMAIL_15MIN = 3;
+const OTP_GLOBAL_PER_DAY = 40;
 async function handleOtp(body: { email?: string }) {
   const email = String(body.email ?? "").trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: "Invalid email" }, 400);
 
-  // Rate limit: at most 5 codes per email per 15 minutes
+  // Per-email limit: at most N codes to one address per 15 minutes
   const since = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-  const { count } = await sb.from("booking_otps")
+  const { count: perEmail } = await sb.from("booking_otps")
     .select("id", { count: "exact", head: true })
     .eq("email", email).gte("created_at", since);
-  if ((count ?? 0) >= 5) {
-    return json({ error: "Too many code requests. Please wait a few minutes." }, 429);
+  if ((perEmail ?? 0) >= OTP_PER_EMAIL_15MIN) {
+    return json({ error: "Too many code requests for this email. Please wait a few minutes." }, 429);
+  }
+
+  // Global daily ceiling: stop anyone draining the Resend quota by
+  // requesting codes for many different addresses.
+  const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { count: global } = await sb.from("booking_otps")
+    .select("id", { count: "exact", head: true })
+    .gte("created_at", since24h);
+  if ((global ?? 0) >= OTP_GLOBAL_PER_DAY) {
+    return json({ error: "The code service is temporarily busy. Please try again later or contact us." }, 429);
   }
 
   const code = String(Math.floor(100000 + Math.random() * 900000));
@@ -135,6 +149,32 @@ async function handleConfirmation(body: { booking_id?: string }) {
       <a href="${myUrl}" style="background:#0369a1;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;">View my bookings</a>
     </p>
     <p style="margin-top:14px;color:#64748b;font-size:0.9rem;">Need to cancel? <a href="${cancelUrl}">Cancel this lesson</a>.</p>
+  `));
+  return json({ ok: true });
+}
+
+// ---------- Slot changed (staff edited a booked lesson) ----------
+async function handleSlotUpdate(body: { booking_id?: string; old_start?: string; old_location?: string }) {
+  const id = String(body.booking_id ?? "");
+  if (!id) return json({ error: "booking_id required" }, 400);
+  const { data: b, error } = await sb.from("bookings")
+    .select("email, first_name, cancel_token, slots(starts_at, duration_min, pools(name, address), profiles!coach_id(display_name))")
+    .eq("id", id).single();
+  if (error || !b) return json({ error: error?.message ?? "not found" }, 404);
+
+  const slot: any = b.slots;
+  const newLoc = slot.pools?.address || slot.pools?.name || "";
+  const cancelUrl = `${SITE_URL}/book.html?cancel=${b.cancel_token}`;
+  const myUrl = `${SITE_URL}/mybookings.html`;
+  await sendEmail(b.email, "Your KSJ Swimming lesson has been updated", shell(`
+    <p>Hi ${esc(b.first_name || "there")}, the details of your lesson have changed:</p>
+    <table style="font-size:0.95rem;">
+      <tr><td style="padding:2px 10px 2px 0;color:#64748b;">Was</td><td style="text-decoration:line-through;color:#94a3b8;">${esc(body.old_start ? fmtWhen(body.old_start) : "")}${body.old_location ? " — " + esc(body.old_location) : ""}</td></tr>
+      <tr><td style="padding:2px 10px 2px 0;color:#64748b;">Now</td><td><strong>${esc(fmtWhen(slot.starts_at))}</strong> (${slot.duration_min} min)${newLoc ? " — " + esc(newLoc) : ""}</td></tr>
+      <tr><td style="padding:2px 10px 2px 0;color:#64748b;">Coach</td><td>${esc(slot.profiles?.display_name || "TBD")}</td></tr>
+    </table>
+    <p style="margin-top:18px;"><a href="${myUrl}" style="background:#0369a1;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;">View my bookings</a></p>
+    <p style="margin-top:14px;color:#64748b;font-size:0.9rem;">If this doesn't work for you, <a href="${cancelUrl}">cancel here</a> and pick another time.</p>
   `));
   return json({ ok: true });
 }
@@ -182,6 +222,7 @@ Deno.serve(async (req) => {
     switch (body.type) {
       case "otp": return await handleOtp(body);
       case "confirmation": return await handleConfirmation(body);
+      case "slot_update": return await handleSlotUpdate(body);
       case "reminders": return await handleReminders(req);
       default: return json({ error: "unknown type" }, 400);
     }

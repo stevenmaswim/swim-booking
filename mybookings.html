@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
   <title>My Bookings — KSJ Swimming</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -60,6 +61,7 @@
     let verifiedEmail = '', verifiedCode = '';
 
     function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+    function escAttr(s) { return esc(s).replace(/"/g, '&quot;'); }
     function showMsg(id, text, type) {
       const el = document.getElementById(id);
       el.textContent = text; el.className = 'msg show ' + type;
@@ -140,7 +142,7 @@
             <div class="muted">${esc(b.pool_name || '')}${b.pool_address ? ' — ' + esc(b.pool_address) : ''}</div>
             <div class="muted">Coach ${esc(b.coach || 'TBD')} · Student ${esc(b.first_name || b.student_name || '')}</div>
           </div>
-          ${cancellable ? `<button class="btn small danger" data-cancel="${esc(b.cancel_token)}" style="align-self:flex-start;">Cancel</button>` : ''}
+          ${cancellable ? `<button class="btn small danger" data-cancel="${escAttr(b.cancel_token)}" style="align-self:flex-start;">Cancel</button>` : ''}
         </div>
       </div>`;
     }
