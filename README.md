@@ -75,8 +75,11 @@ Open `config.js` and paste your two values:
 ```js
 const SUPABASE_URL = "https://xxxx.supabase.co";
 const SUPABASE_ANON_KEY = "eyJ...";
+const BUSINESS_TIMEZONE = "America/Chicago";   // the pool's local timezone (IANA name)
 ```
 (The anon key is safe to publish — all protection comes from database Row Level Security.)
+
+**`BUSINESS_TIMEZONE`** is the single source of truth for the pool's local time. Lesson times are stored in UTC and shown in this zone on the *record* surfaces — the confirmation/reminder/change emails, the CSV export, and the **My Bookings** list — so they always match the clock at the pool regardless of the viewer's device or the server region. Use an [IANA name](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) (e.g. `America/Chicago`, `America/Winnipeg`, `America/New_York`); DST (CDT/CST etc.) is handled automatically. If you change it, also update the matching `BUSINESS_TIMEZONE` secret on the emails Edge Function (below). Note: the *browsing* calendars in `book.html` and `staff.html` intentionally show times in the visitor's own device timezone; only the record surfaces are pinned to the pool zone.
 
 If the values are missing or wrong, every page shows a red banner explaining what to fix — a misconfigured site never renders as a silent blank page.
 
@@ -103,9 +106,10 @@ supabase secrets set --project-ref jvzahjtoiwfsshgzsyym \
   RESEND_API_KEY="re_xxx" \
   FROM_EMAIL="KSJ Swimming <no-reply@ksjswimming.com>" \
   SITE_URL="https://stevenmaswim.github.io/swim-booking" \
+  BUSINESS_TIMEZONE="America/Chicago" \
   CRON_SECRET="$(openssl rand -hex 16)"
 ```
-(`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are provided automatically.) You can verify the from-domain (`ksjswimming.com` here) under Resend → **Domains**; until a domain is verified you can only send from `onboarding@resend.dev` to your own address.
+(`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are provided automatically.) `BUSINESS_TIMEZONE` is the pool's local timezone used to format every time in the emails — keep it equal to the `BUSINESS_TIMEZONE` in `config.js`. It's optional; if unset the function defaults to `America/Chicago`. You can verify the from-domain (`ksjswimming.com` here) under Resend → **Domains**; until a domain is verified you can only send from `onboarding@resend.dev` to your own address.
 
 **d) Deploy the function** — booking and the code request are anonymous, so JWT verification must be off:
 ```bash

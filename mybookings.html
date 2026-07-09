@@ -67,8 +67,11 @@
       el.textContent = text; el.className = 'msg show ' + type;
     }
     function fmtWhen(iso) {
+      // Pin to the pool's timezone (+ abbreviation) so a client's booking
+      // record matches the confirmation email, regardless of their device.
       return new Date(iso).toLocaleString(undefined, {
-        weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+        weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+        timeZone: BUSINESS_TIMEZONE, timeZoneName: 'short'
       });
     }
 

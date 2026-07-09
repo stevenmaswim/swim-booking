@@ -23,6 +23,12 @@ const FROM = Deno.env.get("FROM_EMAIL") ?? "KSJ Swimming <onboarding@resend.dev>
 const SITE_URL = (Deno.env.get("SITE_URL") ?? "").replace(/\/+$/, "");
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 const CRON_SECRET = Deno.env.get("CRON_SECRET") ?? "";
+// The pool's local timezone (IANA name). Every customer-facing time in these
+// emails is formatted explicitly in this zone — never the Edge runtime's
+// default (UTC / the server region) — so the clock time always matches the
+// pool and the website. Override with a BUSINESS_TIMEZONE secret if the
+// school relocates; keep it in sync with BUSINESS_TIMEZONE in config.js.
+const BUSINESS_TIMEZONE = Deno.env.get("BUSINESS_TIMEZONE") ?? "America/Chicago";
 
 const sb = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -67,9 +73,14 @@ async function sendEmail(to: string, subject: string, html: string) {
 }
 
 function fmtWhen(iso: string): string {
+  // timeZoneName:"short" appends the zone abbreviation (e.g. "CDT"/"CST") so
+  // any future zone mismatch is obvious in the email, and it tracks DST
+  // automatically. Always pass timeZone explicitly — the runtime default is
+  // NOT the pool's zone.
   return new Date(iso).toLocaleString("en-US", {
     weekday: "long", month: "long", day: "numeric",
-    hour: "numeric", minute: "2-digit", timeZone: "America/Vancouver",
+    hour: "numeric", minute: "2-digit",
+    timeZone: BUSINESS_TIMEZONE, timeZoneName: "short",
   });
 }
 

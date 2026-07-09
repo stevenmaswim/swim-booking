@@ -1006,7 +1006,7 @@
     };
 
     // ================= CSV export (SignUpGenius-compatible) =================
-    const TIMEZONE = 'America/Vancouver'; // business local time for the CSV
+    const TIMEZONE = BUSINESS_TIMEZONE; // pool's local time (config.js) — matches the emails
     function csvDateTime(d) {
       if (!d) return '';
       const parts = new Intl.DateTimeFormat('en-US', {
