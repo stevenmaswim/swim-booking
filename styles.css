@@ -34,7 +34,8 @@ nav {
 nav .container { display: flex; align-items: center; justify-content: space-between; height: 60px; }
 .brand { font-weight: 800; font-size: 1.15rem; color: var(--blue-dark); text-decoration: none; display: flex; align-items: center; gap: 8px; }
 .nav-links { display: flex; gap: 18px; align-items: center; }
-.nav-links a { text-decoration: none; color: var(--muted); font-weight: 500; font-size: 0.95rem; }
+.nav-links a { text-decoration: none; color: var(--muted); font-weight: 500; font-size: 0.95rem;
+  display: inline-flex; align-items: center; min-height: 44px; } /* full tap height in the 60px bar */
 .nav-links a:hover { color: var(--blue); }
 /* .nav-links a would otherwise repaint button text grey */
 .nav-links a.btn, .nav-links a.btn:hover { color: #fff; }
@@ -42,9 +43,12 @@ nav .container { display: flex; align-items: center; justify-content: space-betw
 
 /* ---- Buttons ---- */
 .btn {
-  display: inline-block; border: none; cursor: pointer;
+  /* inline-flex + min-height keeps a comfortable 44px touch target with
+     the label vertically centered (WCAG 2.5.5 / Apple HIG). */
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; cursor: pointer;
   background: var(--blue); color: #fff;
-  padding: 10px 20px; border-radius: 8px;
+  padding: 10px 20px; border-radius: 8px; min-height: 44px;
   font-size: 0.95rem; font-weight: 600; text-decoration: none;
   transition: background 0.15s;
 }
@@ -53,7 +57,9 @@ nav .container { display: flex; align-items: center; justify-content: space-betw
 .btn.secondary:hover { background: #a5f3fc; }
 .btn.danger { background: #fee2e2; color: var(--red); }
 .btn.danger:hover { background: #fecaca; }
-.btn.small { padding: 6px 12px; font-size: 0.85rem; }
+/* Compact variant for dense staff tables — stays comfortably above the
+   24px WCAG 2.2 AA floor without bloating table rows. */
+.btn.small { padding: 6px 12px; font-size: 0.85rem; min-height: 36px; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn.google {
   background: #fff; color: var(--text); border: 1px solid var(--border);
@@ -71,8 +77,8 @@ nav .container { display: flex; align-items: center; justify-content: space-betw
   box-shadow: var(--shadow); padding: 24px; margin-bottom: 20px;
 }
 label { display: block; font-weight: 600; font-size: 0.88rem; margin: 12px 0 4px; }
-input, select, textarea {
-  width: 100%; padding: 10px 12px; border: 1px solid var(--border);
+input:not([type=checkbox]):not([type=radio]), select, textarea {
+  width: 100%; padding: 10px 12px; min-height: 44px; border: 1px solid var(--border);
   border-radius: 8px; font-size: 0.95rem; font-family: inherit; background: #fff;
 }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--aqua); border-color: transparent; }
@@ -117,6 +123,7 @@ td .rowSel, th #selAll { width: 16px; height: 16px; cursor: pointer; }
 /* ---- Filter chips (customer view) ---- */
 .chips { display: flex; gap: 8px; flex-wrap: wrap; }
 .chip {
+  min-height: 40px; display: inline-flex; align-items: center;
   border: 1px solid var(--border); background: #fff; color: var(--muted);
   border-radius: 999px; padding: 6px 13px; font-size: 0.85rem; font-weight: 600;
   cursor: pointer; transition: background 0.1s;

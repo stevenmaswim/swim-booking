@@ -1443,7 +1443,16 @@
       const g = t => (parts.find(x => x.type === t) || {}).value || '';
       return `${g('month')}/${g('day')}/${g('year')} ${g('hour')}:${g('minute')} ${g('dayPeriod')}`;
     }
-    function csvField(s) { return '"' + String(s == null ? '' : s).replace(/"/g, '""') + '"'; }
+    // Neutralize CSV formula injection: a cell that a spreadsheet would
+    // execute (leading = + - @, or a leading tab/CR that shifts the first
+    // char) is prefixed with a single quote so Excel/Sheets treats it as
+    // text. Client-supplied names flow into these exports, so this protects
+    // whoever opens the file. (OWASP CSV-injection guidance.)
+    function csvField(s) {
+      let v = String(s == null ? '' : s);
+      if (/^[=+\-@\t\r]/.test(v)) v = "'" + v;
+      return '"' + v.replace(/"/g, '""') + '"';
+    }
     function csvRow(fields) { return fields.map(csvField).join(',') + ','; } // trailing comma per line
     const CSV_HEADER = '"Start Date/Time (mm/dd/yyyy)","End Date/Time (mm/dd/yyyy)","Location","Qty","Item","First Name","Last Name","Email","Sign Up Comment","Sign Up Timestamp","Phone","PhoneType",';
     const CSV_FOOTER = '* Sign Ups with no Time Zone';

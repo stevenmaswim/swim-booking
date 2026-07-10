@@ -163,6 +163,57 @@ Either way, share `<your-site>/book.html` in your WeChat group, and make sure `<
 3. Use **Publish Slots** to post bookable times (date, start time, length, how many back-to-back slots, pool, coach, price — prefilled with the default an admin sets on the Revenue tab).
 4. Customers book on `/book.html` — a weekly calendar they can filter by pool, coach, day, and time of day. Booked slots stay visible (greyed, showing "FirstName L." + coach). Every booking creates/updates a client record in the **Clients** tab and sends a confirmation email; a reminder goes out ~2 days before. Customers manage their own lessons at `/mybookings.html` with an emailed code.
 
+## Pre-launch checklist
+
+Before sharing the booking link with real families. (Full audit: `PRELAUNCH_AUDIT.md`.)
+
+**Deploy in this exact order** — the pieces depend on each other:
+1. **Migrations** — in the SQL Editor, run in order: `schema.sql` →
+   `migration_google_auth.sql` → `migration_clients_revenue.sql` → `migration_v3.sql`
+   → `migration_v4.sql` → `migration_security.sql` → `migration_v5.sql` →
+   `migration_v6.sql` → `migration_v7.sql`. (Idempotent from v5 on — safe to re-run.)
+2. **Edge Function secrets** — `supabase secrets set … RESEND_API_KEY / FROM_EMAIL /
+   SITE_URL / BUSINESS_TIMEZONE / CRON_SECRET` (§3b).
+3. **Deploy the Edge Function** — `supabase functions deploy emails --no-verify-jwt`
+   (JWT off is required: booking + code requests are anonymous).
+4. **Enable the reminder cron** — run the `cron.schedule` block from §3b(e) with your
+   real `CRON_SECRET` (not the `__CRON_SECRET__` placeholder).
+5. **Deploy the site** (§4) and confirm `<site>/staff.html` is in Supabase → Auth →
+   URL Configuration → Redirect URLs.
+6. **Verify** — run `supabase/verify_v6.sql` in the SQL Editor; the report (delivered as
+   a deliberate final ERROR) must say **ALL GREEN**. Then do one real end-to-end booking
+   with your own email: select 2 slots → get the code → confirm → check the single
+   confirmation email lists both lessons in Central time → cancel via its link.
+
+**Supabase console settings to confirm (not covered by migrations):**
+- **Auth → Providers**: disable public **email signups** (leave Google on). Random
+  logins can't reach the dashboard regardless (the `staff_emails` allowlist gates it),
+  but disabling signups also closes a minor `role`-visibility leak (audit L1).
+- **Auth → URL Configuration**: Site URL + redirect URLs include your real staff URL.
+- **Storage → `photos`**: bucket is **Public**; INSERT/UPDATE policies limited to image
+  files under `coaches/`/`pools/`; **set a file-size limit** and, ideally, bind writes to
+  the owner (audit M2). Auto-created by `migration_v3.sql` unless you saw its NOTICE.
+- **Resend → Domains**: `ksjswimming.com` (or your domain) **verified**, and
+  `FROM_EMAIL` uses it — until verified you can only send to your own address.
+- **Database → Extensions**: `pg_cron` + `pg_net` enabled (for reminders).
+
+**Watch in the first week:**
+- **Resend dashboard** — delivery/bounce/spam rate; you're on the free tier
+  (100/day, 3,000/mo) — confirmation + reminder + code emails all draw from it.
+- **Supabase → Auth logs / API logs** — unexpected 4xx/5xx spikes or unfamiliar signups.
+- **`booking_otps` growth** — a sudden spike = someone hammering the code endpoint
+  (rate-limited, but a signal to add CAPTCHA — audit M3). `purge_expired_otps()` keeps
+  it tidy; schedule it hourly if you like.
+- **A few real cancellations** — confirm the timestamps + late-cancel badges look right
+  in the Clients/History tabs.
+
+**Rollback:** the frontend is static — `git revert` the bad commit and push; GitHub
+Pages redeploys in ~1 min. The DB migrations are additive; the only destructive step in
+this batch was `migration_v6.sql` **dropping `book_slot`** (replaced by `book_slots`), so
+a frontend rollback past v6 also needs that function restored. Safer path: roll the
+frontend forward with a fix rather than back across the v6 boundary. Edge Function: keep
+the previous version's code to redeploy if a send path breaks.
+
 ## How client data is protected
 
 - **Bookings are invisible to the public.** Row Level Security blocks all anonymous reads of the bookings table — customer emails/phones are only visible to logged-in staff.
