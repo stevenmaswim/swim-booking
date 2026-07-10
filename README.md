@@ -20,7 +20,7 @@ A booking site with no payment infrastructure. Customers with the link book a le
 | `supabase/migration_security.sql` | Security hardening (run after v4) |
 | `supabase/migration_v5.sql` | Slot editing + history/export support |
 | `supabase/migration_v6.sql` | Late-cancel monitor, admin Team management, admin slot reopen, hour×day revenue grid, multi-slot booking with email verification (run last) |
-| `supabase/verify_v6.sql` | Post-migration test suite for the SQL Editor — prints PASS/FAIL, rolls everything back |
+| `supabase/verify_v6.sql` | Post-migration test suite for the SQL Editor — reports PASS/FAIL in a deliberate final "error", rolls everything back |
 | `supabase/verify_v6_api.mjs` | Permission checks against the live REST API with real staff JWTs |
 | `supabase/functions/emails/` | Edge Function that sends confirmation, reminder, and login-code emails via Resend |
 | `config.js` | Your Supabase keys go here |
@@ -37,7 +37,7 @@ A booking site with no payment infrastructure. Customers with the link book a le
 6. Same again for `supabase/migration_v4.sql` → **Run**. This adds first/last/parent names, the self-service **My Bookings** flow, email support, and per-year revenue. **Watch for a NOTICE about the reminder cron** — it's expected until you finish the email setup (next section); the rest of the migration still applies. The confirmation/reminder/code **emails only work once you set up the Edge Function** below.
 7. Same again for `supabase/migration_security.sql` → **Run** (security hardening), then `supabase/migration_v5.sql` → **Run** (slot editing).
 8. Same again for `supabase/migration_v6.sql` → **Run**. This adds the late-cancellation monitor, the admin **Team** tab, admin slot reopen, the hour×day revenue grid, and **multi-slot booking with email verification**. ⚠️ v6 **replaces the booking RPC** (`book_slot` → `book_slots` with a verification code): run it and push the updated `book.html` **at the same time**, and redeploy the `emails` Edge Function — an old page against a new database (or vice-versa) can't take bookings.
-9. **Verify it worked:** paste `supabase/verify_v6.sql` into the SQL Editor → **Run** → read the `NOTICE` lines (every check prints PASS or FAIL; all test data is rolled back automatically). For an end-to-end check with real logins, see `supabase/verify_v6_api.mjs` (header comment explains usage).
+9. **Verify it worked:** paste `supabase/verify_v6.sql` into the SQL Editor → **Run**. The run **ends in an ERROR on purpose** — the error message *is* the report (the editor hides notices, and erroring out forces Postgres to roll back all the test data). Read the PASS/FAIL lines in it; the first line is the summary. For an end-to-end check with real logins, see `supabase/verify_v6_api.mjs` (header comment explains usage).
 6. **Allowlist your staff.** Anyone with a Google account can *sign in*, but only emails in the `staff_emails` table can use the dashboard (enforced in the database, not just the UI). In the SQL Editor:
    ```sql
    insert into public.staff_emails (email) values
