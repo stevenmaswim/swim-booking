@@ -186,9 +186,15 @@ Before sharing the booking link with real families. (Full audit: `PRELAUNCH_AUDI
    confirmation email lists both lessons in Central time → cancel via its link.
 
 **Supabase console settings to confirm (not covered by migrations):**
-- **Auth → Providers**: disable public **email signups** (leave Google on). Random
-  logins can't reach the dashboard regardless (the `staff_emails` allowlist gates it),
-  but disabling signups also closes a minor `role`-visibility leak (audit L1).
+- **Auth → email/password self-signup**: the `staff_emails` allowlist + RLS is the real
+  gate — no one reaches the dashboard or any PII without being allowlisted, signups on or
+  off. To stop *strangers self-registering* email/password accounts, disable the **Email
+  provider's** signup (Authentication → Providers → Email) **only if all your staff use
+  Google**; admins can still create email accounts via **Authentication → Users → Add
+  user** (that bypasses the toggle). ⚠️ Do **not** use the global "disable signups" —
+  it also blocks a newly-allowlisted coach's first Google sign-in. (Note: Google logins
+  still create authenticated users, so this doesn't fully close audit L1 — which is Low
+  and already neutralized by the allowlist.)
 - **Auth → URL Configuration**: Site URL + redirect URLs include your real staff URL.
 - **Storage → `photos`**: bucket is **Public**; INSERT/UPDATE policies limited to image
   files under `coaches/`/`pools/`; **set a file-size limit** and, ideally, bind writes to
@@ -266,5 +272,5 @@ Every week: staff open **Publish Slots**, enter that week's times per pool, done
 - **Google button bounces back to the login page** → the page's URL isn't in **Authentication → URL Configuration → Additional Redirect URLs** (see step 2c), or the provider isn't enabled.
 - **Google says "redirect_uri_mismatch"** → the Supabase callback URL is missing from the Google Cloud OAuth client's Authorized redirect URIs (step 2a).
 - **New Google user can't sign in at all ("Signups not allowed")** → re-enable **Allow new users to sign up** (step 1.5); the allowlist is what keeps strangers out of the dashboard.
-- **Email login fails** → confirm the user exists under Authentication → Users, and email/password sign-in is enabled.
+- **Staff sign in with Google only.** The Email/password provider is disabled (Authentication → Providers → Email), so the login page shows just the Google button. If you ever need email/password logins back, re-enable the Email provider and add the account under Authentication → Users → Add user.
 - **Coach missing from dropdowns** → profiles are created automatically only for allowlisted emails; opening the dashboard once creates a missing profile. If it's still missing, insert a row into `profiles` manually.
