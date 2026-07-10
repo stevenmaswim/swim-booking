@@ -6,6 +6,20 @@
   <meta name="referrer" content="no-referrer">
   <title>Staff — KSJ Swimming</title>
   <link rel="stylesheet" href="styles.css">
+  <style>
+    /* Late-cancellation monitor (informational badges) */
+    .badge.late  { background: #fef3c7; color: #92400e; }
+    .badge.late3 { background: #fee2e2; color: #991b1b; }
+    /* Revenue hour × day grid */
+    .revgrid { border-collapse: collapse; font-size: 0.85rem; }
+    .revgrid th, .revgrid td { border: 1px solid #e2e8f0; padding: 4px 8px; text-align: right; white-space: nowrap; }
+    .revgrid th { background: #f1f5f9; }
+    .revgrid td.has { background: #e0f2fe; }
+    .revgrid .tot { font-weight: 700; background: #f8fafc; }
+    /* Team tab */
+    .team-card { display: flex; gap: 14px; align-items: flex-start; }
+    .team-card img, .team-card .coach-avatar { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; }
+  </style>
 </head>
 <body>
   <nav>
@@ -50,6 +64,7 @@
       <button data-tab="clients">&#128101; Clients</button>
       <button data-tab="pools">&#128205; Pools</button>
       <button data-tab="me">&#128100; My Profile</button>
+      <button data-tab="team" id="teamTabBtn" style="display:none;">&#129333; Team</button>
       <button data-tab="revenue" id="revTabBtn" style="display:none;">&#128176; Revenue</button>
     </div>
 
@@ -61,7 +76,11 @@
         <button class="btn secondary small" id="calNext">Next &rarr;</button>
       </div>
       <p class="muted" style="margin-bottom:8px;"><span class="badge open">Green</span> = open slot, <span class="badge booked">Blue</span> = booked slot. The left stripe shows the pool. Click a slot for details.</p>
-      <div id="poolLegend" style="margin-bottom:10px;"></div>
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+        <div id="poolLegend"></div>
+        <button class="btn small secondary" id="weekExport" type="button" title="Hours log for the displayed week, in the pool's timezone">&#11015; Export week (CSV)</button>
+      </div>
+      <div class="msg" id="weekExportMsg"></div>
       <div class="cal-wrap"><div class="cal" id="calGrid"></div></div>
     </div>
 
@@ -163,8 +182,38 @@
       </div>
     </div>
 
+    <!-- Team tab (admins only — admin_update_profile enforces in the DB) -->
+    <div id="tab-team" style="display:none;">
+      <div class="card">
+        <h3>Team</h3>
+        <p class="muted">Edit any coach's public profile, photo, and role. Demoting the last admin is blocked.</p>
+        <div class="msg" id="teamMsg"></div>
+        <div id="teamList"><p class="empty">Loading&hellip;</p></div>
+      </div>
+    </div>
+
     <!-- Revenue tab (admins only — also enforced in the database) -->
     <div id="tab-revenue" style="display:none;">
+      <div class="card">
+        <h3>Revenue by hour &amp; day</h3>
+        <p class="muted">Confirmed bookings in the pool's timezone — rows are the hour a lesson starts, columns the day of week. Like the paper sheet.</p>
+        <div class="row" style="align-items:flex-end;">
+          <div><label>Range</label><select id="rgRange">
+            <option value="this-week" selected>This week</option>
+            <option value="this-month">This month</option>
+            <option value="this-year">This year</option>
+            <option value="last-week">Last week</option>
+            <option value="last-month">Last month</option>
+            <option value="custom">Custom&hellip;</option>
+          </select></div>
+          <div class="rgCustom" style="display:none;"><label>From</label><input type="date" id="rgFrom"></div>
+          <div class="rgCustom" style="display:none;"><label>To</label><input type="date" id="rgTo"></div>
+          <div><button class="btn secondary" id="rgApply" type="button">Apply</button></div>
+          <div><button class="btn" id="rgExport" type="button">&#11015; Export revenue (CSV)</button></div>
+        </div>
+        <div class="msg" id="rgMsg"></div>
+        <div style="overflow-x:auto; margin-top:12px;"><div id="rgGrid"><p class="empty">Loading&hellip;</p></div></div>
+      </div>
       <div class="card">
         <h3>Revenue</h3>
         <div class="row" style="align-items:flex-end;">
@@ -335,6 +384,22 @@
     }
     function localISO(dateStr, timeStr) { return new Date(dateStr + 'T' + timeStr).toISOString(); }
 
+    // ---- Late-cancellation monitor (informational only) ----
+    // "Late" = cancelled less than 24h before the lesson start. Bookings
+    // cancelled before v6 have no cancelled_at → unknown, never flagged.
+    function lateCancelMs(booking, startsAt) {
+      if (!booking || booking.status !== 'cancelled' || !booking.cancelled_at || !startsAt) return null;
+      const ms = new Date(startsAt) - new Date(booking.cancelled_at);
+      return ms < 24 * 3600e3 ? ms : null;
+    }
+    function lateCancelBadge(ms) {
+      if (ms == null) return '';
+      const label = ms < 0 ? 'after start'
+        : ms >= 3600e3 ? Math.floor(ms / 3600e3) + 'h before'
+        : Math.max(1, Math.round(ms / 60000)) + 'm before';
+      return ` <span class="badge late" title="Cancelled less than 24 hours before the lesson">Cancelled &lt;24h — ${label}</span>`;
+    }
+
     // ================= Auth =================
     async function init() {
       if (!db) { // config.js already shows the red banner explaining why
@@ -386,6 +451,7 @@
       const { data: adm } = await db.rpc('is_admin');
       isAdmin = adm === true;
       document.getElementById('revTabBtn').style.display = isAdmin ? '' : 'none';
+      document.getElementById('teamTabBtn').style.display = isAdmin ? '' : 'none';
       await loadBaseData();
       if (!myProfile) await createMissingProfile();
       document.getElementById('whoami').textContent = myProfile ? myProfile.display_name : user.email;
@@ -446,19 +512,29 @@
       activePools.forEach(x => slPoolSel.insertAdjacentHTML('beforeend',
         `<option value="${x.id}">${esc(x.name)}</option>`));
       const cs = document.getElementById('slCoach');
-      cs.innerHTML = '<option value="">Unassigned</option>';
-      coaches.forEach(x => cs.insertAdjacentHTML('beforeend',
-        `<option value="${x.id}" ${x.id === me.id ? 'selected' : ''}>${esc(x.display_name)}</option>`));
+      if (isAdmin) {
+        cs.innerHTML = '<option value="">Unassigned</option>';
+        coaches.forEach(x => cs.insertAdjacentHTML('beforeend',
+          `<option value="${x.id}" ${x.id === me.id ? 'selected' : ''}>${esc(x.display_name)}</option>`));
+        cs.disabled = false;
+      } else {
+        // Coaches publish slots only under their own name (the DB's insert
+        // policy enforces this too — this just keeps the UI honest).
+        cs.innerHTML = `<option value="${me.id}">${esc(myProfile ? myProfile.display_name : me.email)}</option>`;
+        cs.value = me.id;
+        cs.disabled = true;
+      }
     }
 
     // ================= Tabs =================
     document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
       document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
-      ['calendar','slots','bookings','history','clients','pools','me','revenue'].forEach(t =>
+      ['calendar','slots','bookings','history','clients','pools','me','team','revenue'].forEach(t =>
         document.getElementById('tab-' + t).style.display = (t === b.dataset.tab) ? 'block' : 'none');
-      if (b.dataset.tab === 'revenue') loadRevenue();
+      if (b.dataset.tab === 'revenue') { loadRevenue(); loadRevenueGrid(); }
       if (b.dataset.tab === 'history') initHistory();
+      if (b.dataset.tab === 'team') renderTeam();
     });
 
     // ================= Calendar =================
@@ -709,7 +785,7 @@
     async function loadClients() {
       const [cRes, bRes] = await Promise.all([
         db.from('clients').select('*').order('name'),
-        db.from('bookings').select('client_id, status, slots(starts_at)').limit(5000)
+        db.from('bookings').select('client_id, status, cancelled_at, slots(starts_at)').limit(5000)
       ]);
       const el = document.getElementById('clientsList');
       if (cRes.error) {
@@ -723,12 +799,15 @@
       clientStats = {};
       (bRes.data || []).forEach(b => {
         if (!b.client_id) return;
-        const s = clientStats[b.client_id] = clientStats[b.client_id] || { lessons: 0, cancelled: 0, last: null };
+        const s = clientStats[b.client_id] = clientStats[b.client_id] || { lessons: 0, cancelled: 0, late: 0, last: null };
         if (b.status === 'confirmed') {
           s.lessons++;
           const t = b.slots ? b.slots.starts_at : null;
           if (t && (!s.last || t > s.last)) s.last = t;
-        } else s.cancelled++;
+        } else {
+          s.cancelled++;
+          if (lateCancelMs(b, b.slots ? b.slots.starts_at : null) != null) s.late++;
+        }
       });
       renderClients();
     }
@@ -739,15 +818,19 @@
         (c.name + ' ' + c.email + ' ' + c.phone).toLowerCase().includes(term));
       if (!clientsCache.length) { el.innerHTML = '<p class="empty">No clients yet — they appear automatically with their first booking.</p>'; return; }
       if (!rows.length) { el.innerHTML = '<p class="empty">No clients match your search.</p>'; return; }
-      el.innerHTML = '<table><tr><th>Name</th><th>Email</th><th>Phone</th><th>Lessons</th><th>Cancelled</th><th>Last lesson</th><th>Notes</th></tr>' +
+      el.innerHTML = '<table><tr><th>Name</th><th>Email</th><th>Phone</th><th>Lessons</th><th>Cancelled</th><th>Late cancels</th><th>Last lesson</th><th>Notes</th></tr>' +
         rows.map(c => {
-          const s = clientStats[c.id] || { lessons: 0, cancelled: 0, last: null };
+          const s = clientStats[c.id] || { lessons: 0, cancelled: 0, late: 0, last: null };
+          const lateCell = s.late
+            ? `<span class="badge ${s.late >= 3 ? 'late3' : 'late'}" title="Cancellations less than 24h before the lesson">${s.late} &lt;24h</span>`
+            : '—';
           return `<tr class="clickable" data-client="${c.id}">
             <td><strong>${esc(c.name)}</strong></td>
             <td>${esc(c.email)}</td>
             <td>${esc(c.phone)}</td>
             <td>${s.lessons}</td>
             <td>${s.cancelled}</td>
+            <td>${lateCell}</td>
             <td>${s.last ? fmtDT(new Date(s.last)) : '—'}</td>
             <td class="muted">${esc((c.notes || '').slice(0, 40))}${(c.notes || '').length > 40 ? '…' : ''}</td>
           </tr>`;
@@ -759,12 +842,14 @@
 
     async function openClientModal(c) {
       if (!c) return;
-      const s = clientStats[c.id] || { lessons: 0, cancelled: 0, last: null };
+      const s = clientStats[c.id] || { lessons: 0, cancelled: 0, late: 0, last: null };
       document.getElementById('cmName').textContent = c.name;
       document.getElementById('cmContact').textContent = c.email + (c.phone ? ' · ' + c.phone : '') +
         (c.parent_name ? ' · Parent/guardian: ' + c.parent_name : '');
       document.getElementById('cmStats').textContent =
-        `${s.lessons} lesson${s.lessons === 1 ? '' : 's'} · ${s.cancelled} cancelled · client since ${new Date(c.created_at).toLocaleDateString()}`;
+        `${s.lessons} lesson${s.lessons === 1 ? '' : 's'} · ${s.cancelled} cancelled` +
+        (s.late ? ` (${s.late} less than 24h before the lesson)` : '') +
+        ` · client since ${new Date(c.created_at).toLocaleDateString()}`;
       document.getElementById('cmNotes').value = c.notes || '';
       document.getElementById('cmMsg').className = 'msg';
       document.getElementById('cmHistory').innerHTML = '<p class="empty">Loading…</p>';
@@ -794,7 +879,7 @@
       };
 
       const { data, error } = await db.from('bookings')
-        .select('id, status, student_name, created_at, slots(starts_at, duration_min, pools(name), profiles!coach_id(display_name))')
+        .select('id, status, student_name, created_at, cancelled_at, slots(starts_at, duration_min, pools(name), profiles!coach_id(display_name))')
         .eq('client_id', c.id);
       const h = document.getElementById('cmHistory');
       if (error) { h.innerHTML = ''; showMsg('cmMsg', 'Could not load history: ' + error.message, 'error'); return; }
@@ -806,7 +891,7 @@
           <td>${esc(b.student_name)}</td>
           <td>${esc(b.slots?.pools?.name || '')}</td>
           <td>${esc(b.slots?.profiles?.display_name || '—')}</td>
-          <td><span class="badge ${b.status === 'confirmed' ? 'booked' : 'cancelled'}">${b.status}</span></td>
+          <td><span class="badge ${b.status === 'confirmed' ? 'booked' : 'cancelled'}">${b.status}</span>${lateCancelBadge(lateCancelMs(b, b.slots?.starts_at))}</td>
         </tr>`).join('') + '</table>';
     }
 
@@ -1005,6 +1090,206 @@
       document.getElementById('whoami').textContent = myProfile.display_name;
     };
 
+    // ================= Team (admins manage all profiles) =================
+    // The DB is the real gate: admin_update_profile() raises for non-admins
+    // and guards against demoting the last admin. This tab is presentation.
+    function renderTeam() {
+      if (!isAdmin) return;
+      const el = document.getElementById('teamList');
+      if (!coaches.length) { el.innerHTML = '<p class="empty">No coach profiles yet.</p>'; return; }
+      el.innerHTML = coaches.map(c => `
+        <div class="card team-card" data-team="${c.id}" style="margin-top:12px;">
+          ${c.photo_url
+            ? `<img src="${escAttr(c.photo_url)}" alt="">`
+            : `<div class="coach-avatar" style="margin:0;">${esc((c.display_name || '?').charAt(0).toUpperCase())}</div>`}
+          <div style="flex:1; min-width:220px;">
+            <div class="row">
+              <div><label>Display name</label><input class="tmName" value="${escAttr(c.display_name)}"></div>
+              <div><label>Role</label><select class="tmRole">
+                <option value="coach" ${c.role !== 'admin' ? 'selected' : ''}>Coach</option>
+                <option value="admin" ${c.role === 'admin' ? 'selected' : ''}>Admin</option>
+              </select></div>
+            </div>
+            <label>Bio</label>
+            <textarea class="tmBio" rows="2">${esc(c.bio || '')}</textarea>
+            <label style="display:flex; align-items:center; gap:8px; margin-top:8px;">
+              <input type="checkbox" class="tmPublic" style="width:auto;" ${c.is_public ? 'checked' : ''}> Show on the public site
+            </label>
+            <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+              <button class="btn small tmSave" type="button">Save</button>
+              <button class="btn small secondary tmPhotoBtn" type="button">${c.photo_url ? 'Replace photo' : 'Add photo'}</button>
+              <input type="file" accept="image/*" class="tmPhotoFile" style="display:none;">
+              ${c.id === me.id ? '<span class="muted" style="font-size:0.85rem;">(this is you)</span>' : ''}
+            </div>
+          </div>
+        </div>`).join('');
+
+      el.querySelectorAll('[data-team]').forEach(cardEl => {
+        const id = cardEl.dataset.team;
+        const save = async (photoUrl) => {
+          const { error } = await db.rpc('admin_update_profile', {
+            p_id: id,
+            p_display_name: cardEl.querySelector('.tmName').value,
+            p_bio: cardEl.querySelector('.tmBio').value,
+            p_is_public: cardEl.querySelector('.tmPublic').checked,
+            p_role: cardEl.querySelector('.tmRole').value,
+            p_photo_url: photoUrl || null
+          });
+          if (error) { showMsg('teamMsg', 'Could not save: ' + error.message, 'error'); return false; }
+          showMsg('teamMsg', 'Profile saved.', 'success');
+          await loadBaseData();
+          renderTeam(); fillProfileForm();
+          return true;
+        };
+        cardEl.querySelector('.tmSave').onclick = () => save(null);
+        cardEl.querySelector('.tmPhotoBtn').onclick = () => cardEl.querySelector('.tmPhotoFile').click();
+        cardEl.querySelector('.tmPhotoFile').onchange = async (e) => {
+          const f = e.target.files[0];
+          if (!f) return;
+          const url = await uploadPhoto('coaches/' + id + '.jpg', f, 'teamMsg');
+          if (url) await save(url);
+        };
+      });
+    }
+
+    // ================= Weekly schedule export (hours log) =================
+    // All staff may export: it's the schedule they already see, with times
+    // in the pool's timezone so the log matches the pool wall clock.
+    function bizParts(d) {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: BUSINESS_TIMEZONE, weekday: 'short', year: 'numeric',
+        month: '2-digit', day: '2-digit', hour: 'numeric', minute: '2-digit', hour12: true
+      }).formatToParts(new Date(d));
+      const g = t => (parts.find(x => x.type === t) || {}).value || '';
+      return {
+        date: `${g('month')}/${g('day')}/${g('year')}`,
+        day: g('weekday'),
+        time: `${g('hour')}:${g('minute')} ${g('dayPeriod')}`
+      };
+    }
+    document.getElementById('weekExport').onclick = async () => {
+      const end = new Date(calStart); end.setDate(end.getDate() + 7);
+      showMsg('weekExportMsg', 'Preparing…', 'success');
+      const { data, error } = await db.from('slots')
+        .select('id, starts_at, duration_min, status, pools(name), profiles!coach_id(display_name), bookings(first_name,last_name,status)')
+        .gte('starts_at', calStart.toISOString()).lt('starts_at', end.toISOString())
+        .neq('status', 'cancelled')
+        .order('starts_at').limit(2000);
+      if (error) { showMsg('weekExportMsg', 'Export failed: ' + error.message, 'error'); return; }
+      const slots = data || [];
+      if (!slots.length) { showMsg('weekExportMsg', 'No slots in the displayed week.', 'error'); return; }
+
+      const lines = [['Date','Day','Start Time','End Time','Duration (min)','Pool','Coach','Status','Student']
+        .map(csvField).join(',')];
+      const perCoach = {}; // coach -> { booked: minutes, open: minutes }
+      for (const s of slots) {
+        const start = bizParts(s.starts_at);
+        const endT = bizParts(new Date(new Date(s.starts_at).getTime() + s.duration_min * 60000));
+        const coach = s.profiles?.display_name || 'Unassigned';
+        const b = (s.bookings || []).find(x => x.status === 'confirmed');
+        const student = s.status === 'booked' && b
+          ? ((b.first_name || '') + ' ' + (b.last_name || '')).trim() : '';
+        const pc = perCoach[coach] = perCoach[coach] || { booked: 0, open: 0 };
+        if (s.status === 'booked') pc.booked += s.duration_min; else pc.open += s.duration_min;
+        lines.push([start.date, start.day, start.time, endT.time, s.duration_min,
+          s.pools?.name || '', coach, s.status, student].map(csvField).join(','));
+      }
+      const hrs = m => (m / 60).toFixed(2);
+      lines.push('');
+      lines.push(['Coach', 'Booked hours', 'Open hours'].map(csvField).join(','));
+      Object.keys(perCoach).sort().forEach(coach =>
+        lines.push([coach, hrs(perCoach[coach].booked), hrs(perCoach[coach].open)].map(csvField).join(',')));
+
+      downloadCsv(`ksj-schedule-${ymd(calStart)}.csv`, '﻿' + lines.join('\r\n'));
+      showMsg('weekExportMsg', `Exported ${slots.length} slot${slots.length === 1 ? '' : 's'}.`, 'success');
+    };
+
+    // ================= Revenue: hour-of-day × day-of-week grid =================
+    // Admin-only, enforced by get_revenue_grid() in the database.
+    const RG_DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    let rgCells = [], rgSpan = null;
+    function rgHourLabel(h) { return `${h % 12 || 12} ${h < 12 ? 'AM' : 'PM'}`; }
+    function rgRangeDates() {
+      return presetRange(document.getElementById('rgRange').value,
+        document.getElementById('rgFrom').value, document.getElementById('rgTo').value);
+    }
+    async function loadRevenueGrid() {
+      if (!isAdmin) return;
+      const { start, end } = rgRangeDates();
+      const { data, error } = await db.rpc('get_revenue_grid', {
+        p_from: start.toISOString(),
+        p_to: new Date(end.getTime() + 1).toISOString(), // dayEnd is inclusive; RPC is exclusive
+        p_tz: BUSINESS_TIMEZONE
+      });
+      if (error) { showMsg('rgMsg', 'Could not load the grid: ' + error.message, 'error'); return; }
+      rgCells = data.cells || []; rgSpan = { start, end };
+      renderRevGrid();
+    }
+    // Build the {hour × dow} matrix. Always shows 6 AM–10 PM like the paper
+    // sheet; rows outside that range appear automatically if data exists.
+    function rgMatrix() {
+      const map = {}; let minH = 6, maxH = 21;
+      rgCells.forEach(c => {
+        map[c.hour + '-' + c.dow] = c;
+        if (c.hour < minH) minH = c.hour;
+        if (c.hour > maxH) maxH = c.hour;
+      });
+      return { map, minH, maxH };
+    }
+    function renderRevGrid() {
+      const el = document.getElementById('rgGrid');
+      if (!rgCells.length) { el.innerHTML = '<p class="empty">No confirmed bookings in this range.</p>'; return; }
+      const { map, minH, maxH } = rgMatrix();
+      const colTot = Array(8).fill(0); // 1..7
+      let grand = 0;
+      let html = '<table class="revgrid"><tr><th></th>' + RG_DAYS.map(d => `<th>${d}</th>`).join('') + '<th class="tot">Total</th></tr>';
+      for (let h = minH; h <= maxH; h++) {
+        let rowTot = 0, row = `<tr><th>${rgHourLabel(h)}</th>`;
+        for (let dow = 1; dow <= 7; dow++) {
+          const c = map[h + '-' + dow];
+          const rev = c ? Number(c.revenue) : 0;
+          rowTot += rev; colTot[dow] += rev;
+          row += c
+            ? `<td class="has" title="${c.lessons} lesson${c.lessons === 1 ? '' : 's'}">${money(rev)}</td>`
+            : '<td></td>';
+        }
+        grand += rowTot;
+        html += row + `<td class="tot">${rowTot ? money(rowTot) : ''}</td></tr>`;
+      }
+      html += '<tr><th class="tot">Total</th>' +
+        RG_DAYS.map((_, i) => `<td class="tot">${colTot[i + 1] ? money(colTot[i + 1]) : ''}</td>`).join('') +
+        `<td class="tot">${money(grand)}</td></tr></table>`;
+      el.innerHTML = html;
+    }
+    document.getElementById('rgRange').onchange = () => {
+      const c = document.getElementById('rgRange').value === 'custom';
+      document.querySelectorAll('.rgCustom').forEach(e => e.style.display = c ? '' : 'none');
+    };
+    document.getElementById('rgApply').onclick = loadRevenueGrid;
+    document.getElementById('rgExport').onclick = async () => {
+      await loadRevenueGrid(); // export exactly what's displayed, freshly loaded
+      if (!rgSpan) return;
+      const { map, minH, maxH } = rgMatrix();
+      const colTot = Array(8).fill(0); let grand = 0;
+      const lines = [['Hour', ...RG_DAYS, 'Total'].map(csvField).join(',')];
+      for (let h = minH; h <= maxH; h++) {
+        let rowTot = 0;
+        const cells = [];
+        for (let dow = 1; dow <= 7; dow++) {
+          const c = map[h + '-' + dow];
+          const rev = c ? Number(c.revenue) : 0;
+          rowTot += rev; colTot[dow] += rev;
+          cells.push(rev ? rev.toFixed(2) : '');
+        }
+        grand += rowTot;
+        lines.push([rgHourLabel(h), ...cells, rowTot.toFixed(2)].map(csvField).join(','));
+      }
+      lines.push(['Total', ...RG_DAYS.map((_, i) => colTot[i + 1].toFixed(2)), grand.toFixed(2)]
+        .map(csvField).join(','));
+      downloadCsv(`ksj-revenue-grid-${ymd(rgSpan.start)}_to_${ymd(rgSpan.end)}.csv`, '﻿' + lines.join('\r\n'));
+      showMsg('rgMsg', 'Revenue grid exported.', 'success');
+    };
+
     // ================= CSV export (SignUpGenius-compatible) =================
     const TIMEZONE = BUSINESS_TIMEZONE; // pool's local time (config.js) — matches the emails
     function csvDateTime(d) {
@@ -1080,7 +1365,7 @@
     }
     async function fetchRangeSlots({ start, end, coachId, poolId, includeCancelled }) {
       let q = db.from('slots')
-        .select('id, starts_at, duration_min, status, pool_id, coach_id, pools(name,address), profiles!coach_id(display_name), bookings(first_name,last_name,email,phone,parent_name,created_at,status)')
+        .select('id, starts_at, duration_min, status, pool_id, coach_id, pools(name,address), profiles!coach_id(display_name), bookings(first_name,last_name,email,phone,parent_name,created_at,status,cancelled_at)')
         .gte('starts_at', start.toISOString()).lte('starts_at', end.toISOString())
         .order('starts_at', { ascending: false }).limit(5000);
       if (!includeCancelled) q = q.neq('status', 'cancelled');
@@ -1136,19 +1421,29 @@
       const pages = Math.ceil(hxRows.length / HX_PER);
       hxPage = Math.min(hxPage, pages - 1);
       const slice = hxRows.slice(hxPage * HX_PER, hxPage * HX_PER + HX_PER);
-      el.innerHTML = '<table><tr><th>When</th><th>Pool</th><th>Coach</th><th>Student</th><th>Status</th></tr>' +
+      el.innerHTML = '<table><tr><th>When</th><th>Pool</th><th>Coach</th><th>Student</th><th>Status</th><th></th></tr>' +
         slice.map(s => {
           const b = (s.bookings || []).find(x => x.status === 'confirmed') ||
             (s.bookings || []).filter(x => x.status === 'cancelled').sort((a, c) => new Date(c.created_at) - new Date(a.created_at))[0];
           const who = b ? ((b.first_name || '') + ' ' + (b.last_name || '')).trim() : '';
+          // Admins may reopen a future cancelled slot (DB gate: reopen_slot)
+          const canReopen = isAdmin && s.status === 'cancelled' && new Date(s.starts_at) > new Date();
           return `<tr>
             <td>${fmtDT(new Date(s.starts_at))} (${s.duration_min}m)</td>
             <td>${esc(s.pools?.name || '')}</td>
             <td>${esc(s.profiles?.display_name || '—')}</td>
             <td>${esc(who) || '—'}</td>
-            <td><span class="badge ${s.status === 'booked' ? 'booked' : s.status === 'cancelled' ? 'cancelled' : 'open'}">${esc(s.status)}</span></td>
+            <td><span class="badge ${s.status === 'booked' ? 'booked' : s.status === 'cancelled' ? 'cancelled' : 'open'}">${esc(s.status)}</span>${b && b.status === 'cancelled' ? lateCancelBadge(lateCancelMs(b, s.starts_at)) : ''}</td>
+            <td>${canReopen ? `<button class="btn small secondary" data-reopen="${s.id}">Reopen</button>` : ''}</td>
           </tr>`;
         }).join('') + '</table>';
+      el.querySelectorAll('[data-reopen]').forEach(btn => btn.onclick = async () => {
+        if (!confirm('Reopen this cancelled slot so clients can book it again?')) return;
+        const { error } = await db.rpc('reopen_slot', { p_slot_id: btn.dataset.reopen });
+        if (error) { showMsg('hxMsg', 'Could not reopen: ' + error.message, 'error'); return; }
+        showMsg('hxMsg', 'Slot reopened.', 'success');
+        loadHistory(); renderCalendar(); loadSlotAdmin();
+      });
       const pager = document.getElementById('hxPager');
       pager.style.display = pages > 1 ? 'flex' : 'none';
       document.getElementById('hxPageInfo').textContent = `Page ${hxPage + 1} of ${pages} · ${hxRows.length} lessons`;
@@ -1179,7 +1474,10 @@
       pools.filter(p => p.active || p.id === data.pool_id).forEach(p =>
         poolSel.insertAdjacentHTML('beforeend', `<option value="${p.id}">${esc(p.name)}</option>`));
       const coachSel = document.getElementById('edCoach'); coachSel.innerHTML = '<option value="">Unassigned</option>';
-      coaches.forEach(c => coachSel.insertAdjacentHTML('beforeend', `<option value="${c.id}">${esc(c.display_name)}</option>`));
+      // Coaches can keep a slot for themselves or unassign it — only admins
+      // may hand it to someone else (edit_slot enforces this in the DB).
+      (isAdmin ? coaches : coaches.filter(c => c.id === me.id))
+        .forEach(c => coachSel.insertAdjacentHTML('beforeend', `<option value="${c.id}">${esc(c.display_name)}</option>`));
       const st = new Date(data.starts_at);
       document.getElementById('edDate').value = ymd(st);
       document.getElementById('edStart').value = String(st.getHours()).padStart(2, '0') + ':' + String(st.getMinutes()).padStart(2, '0');

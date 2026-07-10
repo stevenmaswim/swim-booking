@@ -6,6 +6,25 @@
   <meta name="referrer" content="no-referrer">
   <title>Book a Lesson — KSJ Swimming</title>
   <link rel="stylesheet" href="styles.css">
+  <style>
+    /* Multi-select booking */
+    .bcal-slot.is-selected { outline: 3px solid #0369a1; outline-offset: -1px; background: #e0f2fe; }
+    .bcal-slot .checkmark { display: none; color: #0369a1; font-weight: 800; }
+    .bcal-slot.is-selected .checkmark { display: inline; }
+    .tray {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+      background: #075985; color: #fff; padding: 12px 18px;
+      display: none; align-items: center; justify-content: center; gap: 14px;
+      box-shadow: 0 -4px 14px rgba(2, 6, 23, 0.25);
+    }
+    .tray.show { display: flex; }
+    .tray .btn { margin: 0; }
+    .sel-list { margin: 8px 0 4px; padding-left: 0; list-style: none; font-size: 0.93rem; }
+    .sel-list li { padding: 3px 0; border-bottom: 1px dashed #e2e8f0; }
+    .verify-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+    .verify-row > div { flex: 1; min-width: 140px; }
+    .verified-note { color: #15803d; font-weight: 600; font-size: 0.92rem; margin: 6px 0; }
+  </style>
 </head>
 <body>
   <nav>
@@ -48,12 +67,18 @@
     </div>
   </div>
 
+  <!-- Selection tray -->
+  <div class="tray" id="selTray">
+    <span id="trayCount"></span>
+    <button class="btn small secondary" id="trayClear" type="button">Clear</button>
+    <button class="btn small" id="trayBook" type="button" style="background:#fff;color:#075985;">Book selected &rarr;</button>
+  </div>
+
   <!-- Booking modal -->
   <div class="modal-backdrop" id="bookModal">
     <div class="modal">
-      <img id="modalCoachPhoto" alt="" style="display:none; width:56px; height:56px; border-radius:50%; object-fit:cover; float:right; margin-left:10px;">
-      <h3>Confirm your lesson</h3>
-      <p class="muted" id="modalSlotInfo"></p>
+      <h3>Confirm your lessons</h3>
+      <ul class="sel-list" id="modalSlotList"></ul>
       <form id="bookForm">
         <div class="row">
           <div><label for="fFirst">Student first name</label>
@@ -67,10 +92,26 @@
         <input id="fEmail" type="email" required placeholder="you@example.com">
         <label for="fPhone">Phone</label>
         <input id="fPhone" type="tel" required minlength="7" placeholder="e.g. 604-555-1234">
+
+        <!-- Email verification: 6-digit code, skipped for 24h once verified -->
+        <div id="verifiedNote" class="verified-note" style="display:none;">&#10003; Email verified — no code needed.</div>
+        <div id="codeBlock">
+          <div class="verify-row">
+            <div>
+              <label for="fCode">Email verification code</label>
+              <input id="fCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code">
+            </div>
+            <div style="flex:0 0 auto;">
+              <button type="button" class="btn secondary" id="sendCodeBtn">Email me a code</button>
+            </div>
+          </div>
+          <p class="muted" style="font-size:0.85rem; margin:4px 0 0;">We verify your email so your confirmation and cancellation links reach you.</p>
+        </div>
+
         <div class="msg" id="bookMsg"></div>
         <div class="row" style="margin-top: 16px;">
           <button type="button" class="btn secondary" id="closeModal">Back</button>
-          <button type="submit" class="btn" id="submitBtn">Book this slot</button>
+          <button type="submit" class="btn" id="submitBtn">Book</button>
         </div>
       </form>
     </div>
@@ -80,10 +121,9 @@
   <div class="modal-backdrop" id="doneModal">
     <div class="modal" style="text-align:center;">
       <div style="font-size: 2.4rem;">&#127881;</div>
-      <h3>You're booked!</h3>
-      <p id="doneInfo" class="muted"></p>
-      <p class="muted" style="margin-top:10px;">Save this link in case you need to cancel:</p>
-      <input id="cancelLink" readonly style="margin-top:6px; font-size:0.8rem;" onclick="this.select()">
+      <h3 id="doneTitle">You're booked!</h3>
+      <ul class="sel-list" id="doneList" style="text-align:left;"></ul>
+      <p class="muted" style="margin-top:10px;">A confirmation email with a cancel link for each lesson is on its way. You can also manage everything in <a href="mybookings.html">My Bookings</a>.</p>
       <button class="btn" style="margin-top: 16px;" onclick="location.href='book.html'">Done</button>
     </div>
   </div>
@@ -96,9 +136,30 @@
   <script src="config.js"></script>
   <script>
     let weekStart = startOfWeek(new Date());
-    let selectedSlot = null;
+    const selected = new Map(); // slot id -> slot (selections survive week navigation)
     let pools = [];
     let lastFetched = []; // slots for the current week (pool/coach filters applied server-side)
+
+    // ---- 24h "verified email" token (issued by book_slots, stored locally) ----
+    const VERIFY_KEY = 'ksj_verified';
+    function storedVerification(email) {
+      try {
+        const v = JSON.parse(localStorage.getItem(VERIFY_KEY) || 'null');
+        if (v && v.email === email.trim().toLowerCase() && v.exp > Date.now() && v.token) return v.token;
+      } catch (e) { /* corrupted storage — treat as unverified */ }
+      return null;
+    }
+    function saveVerification(email, token) {
+      try {
+        localStorage.setItem(VERIFY_KEY, JSON.stringify({
+          email: email.trim().toLowerCase(), token,
+          exp: Date.now() + 23.5 * 3600 * 1000 // slightly under the server's 24h
+        }));
+      } catch (e) { /* private mode — verification just won't be remembered */ }
+    }
+    function clearVerification() {
+      try { localStorage.removeItem(VERIFY_KEY); } catch (e) {}
+    }
 
     function startOfWeek(d) {
       const x = new Date(d); x.setHours(0, 0, 0, 0);
@@ -212,9 +273,10 @@
           const coachName = s.profiles ? esc(s.profiles.display_name) : 'TBD';
           const bookedBy = isBooked && s.booked_by_display
             ? `<br><span class="muted">Booked by ${esc(s.booked_by_display)}</span>` : '';
+          const isSel = selected.has(s.id);
           cards += `
-            <div class="slot-chip bcal-slot${isBooked ? ' is-booked' : ''}"${isBooked ? '' : ` data-id="${s.id}"`}>
-              <div class="time">${fmtTime(st)}${isBooked ? ' <span class="badge booked">Booked</span>' : ''}</div>
+            <div class="slot-chip bcal-slot${isBooked ? ' is-booked' : ''}${isSel ? ' is-selected' : ''}"${isBooked ? '' : ` data-id="${s.id}"`}>
+              <div class="time"><span class="checkmark">&#10003; </span>${fmtTime(st)}${isBooked ? ' <span class="badge booked">Booked</span>' : ''}</div>
               <div class="meta">${s.duration_min} min · ${esc(s.pools?.name || '')}<br>Coach ${coachName}${bookedBy}</div>
             </div>`;
         });
@@ -225,53 +287,141 @@
       }).join('') + '</div>';
 
       list.querySelectorAll('.bcal-slot[data-id]').forEach(chip => {
-        chip.onclick = () => openModal(lastFetched.find(s => s.id === chip.dataset.id));
+        chip.onclick = () => toggleSelect(lastFetched.find(s => s.id === chip.dataset.id), chip);
       });
     }
 
-    function openModal(slot) {
-      selectedSlot = slot;
-      const d = new Date(slot.starts_at);
-      document.getElementById('modalSlotInfo').textContent =
-        `${fmtDay(d)} at ${fmtTime(d)} · ${slot.duration_min} min · ${slot.pools?.name || ''}` +
-        (slot.profiles ? ` · Coach ${slot.profiles.display_name}` : '');
-      const photo = document.getElementById('modalCoachPhoto');
-      if (slot.profiles?.photo_url) { photo.src = slot.profiles.photo_url; photo.style.display = 'block'; }
-      else photo.style.display = 'none';
+    // ---- Multi-select + tray ----
+    function toggleSelect(slot, chip) {
+      if (!slot) return;
+      if (selected.has(slot.id)) selected.delete(slot.id);
+      else {
+        if (selected.size >= 8) { showMsg('listMsg', 'You can book at most 8 lessons at a time.', 'error'); return; }
+        selected.set(slot.id, slot);
+      }
+      chip.classList.toggle('is-selected', selected.has(slot.id));
+      updateTray();
+    }
+    function updateTray() {
+      const tray = document.getElementById('selTray');
+      tray.classList.toggle('show', selected.size > 0);
+      document.getElementById('trayCount').textContent =
+        `${selected.size} lesson${selected.size === 1 ? '' : 's'} selected`;
+    }
+    document.getElementById('trayClear').onclick = () => {
+      selected.clear(); updateTray(); renderWeek();
+    };
+    document.getElementById('trayBook').onclick = openBookingModal;
+
+    function slotLine(s) {
+      const d = new Date(s.starts_at);
+      return `<strong>${fmtDay(d)} at ${fmtTime(d)}</strong> · ${s.duration_min} min · ${esc(s.pools?.name || '')}` +
+        (s.profiles ? ` · Coach ${esc(s.profiles.display_name)}` : '');
+    }
+    function openBookingModal() {
+      if (!selected.size) return;
+      const slots = [...selected.values()].sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
+      document.getElementById('modalSlotList').innerHTML = slots.map(s => `<li>${slotLine(s)}</li>`).join('');
       document.getElementById('bookMsg').className = 'msg';
+      refreshVerifyUI();
       document.getElementById('bookModal').classList.add('show');
     }
+
+    // ---- Email verification UI ----
+    function refreshVerifyUI() {
+      const email = document.getElementById('fEmail').value;
+      const hasToken = email && !!storedVerification(email);
+      document.getElementById('verifiedNote').style.display = hasToken ? 'block' : 'none';
+      document.getElementById('codeBlock').style.display = hasToken ? 'none' : 'block';
+    }
+    document.getElementById('fEmail').addEventListener('input', refreshVerifyUI);
+
+    let codeCooldown = null;
+    document.getElementById('sendCodeBtn').onclick = async () => {
+      const email = document.getElementById('fEmail').value.trim();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+        showMsg('bookMsg', 'Enter your email above first, then request the code.', 'error'); return;
+      }
+      const btn = document.getElementById('sendCodeBtn');
+      btn.disabled = true; btn.textContent = 'Sending…';
+      const { error } = await db.functions.invoke('emails', { body: { type: 'otp', email } });
+      if (error) {
+        btn.disabled = false; btn.textContent = 'Email me a code';
+        showMsg('bookMsg', 'Could not send a code: ' + (error.message || error), 'error');
+        return;
+      }
+      showMsg('bookMsg', 'Code sent — check your inbox (and spam).', 'success');
+      document.getElementById('fCode').focus();
+      // Small client-side cooldown; the server rate-limits regardless.
+      let left = 30;
+      btn.textContent = `Sent (${left})`;
+      clearInterval(codeCooldown);
+      codeCooldown = setInterval(() => {
+        left--;
+        if (left <= 0) { clearInterval(codeCooldown); btn.disabled = false; btn.textContent = 'Resend code'; }
+        else btn.textContent = `Sent (${left})`;
+      }, 1000);
+    };
 
     document.getElementById('closeModal').onclick = () =>
       document.getElementById('bookModal').classList.remove('show');
 
     document.getElementById('bookForm').onsubmit = async (e) => {
       e.preventDefault();
+      const email = document.getElementById('fEmail').value;
+      const token = storedVerification(email);
+      const code = document.getElementById('fCode').value.trim();
+      if (!token && !/^\d{6}$/.test(code)) {
+        showMsg('bookMsg', 'Enter the 6-digit code from your email (use "Email me a code" if you don\'t have one).', 'error');
+        return;
+      }
       const btn = document.getElementById('submitBtn');
       btn.disabled = true; btn.textContent = 'Booking…';
-      const { data, error } = await db.rpc('book_slot', {
-        p_slot_id: selectedSlot.id,
+      const { data, error } = await db.rpc('book_slots', {
+        p_slot_ids: [...selected.keys()],
         p_first_name: document.getElementById('fFirst').value,
         p_last_name: document.getElementById('fLast').value,
         p_parent_name: document.getElementById('fParent').value,
-        p_email: document.getElementById('fEmail').value,
-        p_phone: document.getElementById('fPhone').value
+        p_email: email,
+        p_phone: document.getElementById('fPhone').value,
+        p_code: token ? null : code,
+        p_verify_token: token,
+        p_tz: BUSINESS_TIMEZONE
       });
-      btn.disabled = false; btn.textContent = 'Book this slot';
-      if (error) { showMsg('bookMsg', error.message, 'error'); loadSlots(); return; }
+      btn.disabled = false; btn.textContent = 'Book';
+      // Wrong-code failures come back as data.error (not an exception) so
+      // the server's attempt counter persists — see migration_v6.sql.
+      const emsg = error ? error.message : (data && data.error);
+      if (emsg) {
+        // An expired/revoked token surfaces as a verification error — fall
+        // back to the code flow instead of a dead end.
+        if (token && /verify your email|request a code/i.test(emsg)) {
+          clearVerification(); refreshVerifyUI();
+          showMsg('bookMsg', 'Your 24h verification expired — request a new code below.', 'error');
+        } else {
+          showMsg('bookMsg', emsg, 'error');
+        }
+        loadSlots(); // a named slot may have been taken — refresh the grid
+        return;
+      }
 
-      // Fire off the confirmation email (best-effort — booking already succeeded)
-      db.functions.invoke('emails', { body: { type: 'confirmation', booking_id: data.booking_id } })
-        .catch(() => {});
+      if (data.verify_token) saveVerification(email, data.verify_token);
+      const booked = data.bookings || [];
+
+      // One confirmation email listing every lesson (best-effort)
+      db.functions.invoke('emails', { body: {
+        type: 'confirmation', booking_ids: booked.map(b => b.booking_id)
+      } }).catch(() => {});
 
       document.getElementById('bookModal').classList.remove('show');
-      const d = new Date(data.starts_at);
-      document.getElementById('doneInfo').textContent =
-        `${fmtDay(d)} at ${fmtTime(d)}. See you at the pool! A confirmation email is on its way.`;
-      document.getElementById('cancelLink').value =
-        location.origin + location.pathname + '?cancel=' + data.cancel_token;
+      document.getElementById('doneTitle').textContent =
+        booked.length === 1 ? "You're booked!" : `All ${booked.length} lessons booked!`;
+      document.getElementById('doneList').innerHTML = booked
+        .map(b => { const d = new Date(b.starts_at); return `<li>${fmtDay(d)} at ${fmtTime(d)}</li>`; })
+        .join('');
       document.getElementById('doneModal').classList.add('show');
       document.getElementById('bookForm').reset();
+      selected.clear(); updateTray(); loadSlots();
     };
 
     // Self-service cancellation via ?cancel=TOKEN

@@ -16,7 +16,12 @@ A booking site with no payment infrastructure. Customers with the link book a le
 | `supabase/migration_google_auth.sql` | Google sign-in + staff allowlist (run after `schema.sql`) |
 | `supabase/migration_clients_revenue.sql` | Client CRM + admin-only revenue tracking |
 | `supabase/migration_v3.sql` | Photos, public booked-slot visibility, coach/admin permissions |
-| `supabase/migration_v4.sql` | First/last/parent names, self-service bookings, emails, per-year revenue (run last) |
+| `supabase/migration_v4.sql` | First/last/parent names, self-service bookings, emails, per-year revenue |
+| `supabase/migration_security.sql` | Security hardening (run after v4) |
+| `supabase/migration_v5.sql` | Slot editing + history/export support |
+| `supabase/migration_v6.sql` | Late-cancel monitor, admin Team management, admin slot reopen, hour×day revenue grid, multi-slot booking with email verification (run last) |
+| `supabase/verify_v6.sql` | Post-migration test suite for the SQL Editor — prints PASS/FAIL, rolls everything back |
+| `supabase/verify_v6_api.mjs` | Permission checks against the live REST API with real staff JWTs |
 | `supabase/functions/emails/` | Edge Function that sends confirmation, reminder, and login-code emails via Resend |
 | `config.js` | Your Supabase keys go here |
 | `styles.css` | Shared styling |
@@ -30,6 +35,9 @@ A booking site with no payment infrastructure. Customers with the link book a le
 4. Same again for `supabase/migration_clients_revenue.sql` → **Run**. This adds client tracking (CRM) and revenue reporting.
 5. Same again for `supabase/migration_v3.sql` → **Run**. This adds photos, publicly visible booked slots, and coach/admin permissions. **Watch the output for a NOTICE about storage** — if it appears, your project doesn't allow storage setup via SQL; create the bucket by hand: **Storage → New bucket** → name `photos` → check **Public bucket** → Save, then under the bucket's **Policies** add: SELECT for everyone, INSERT and UPDATE for `authenticated`.
 6. Same again for `supabase/migration_v4.sql` → **Run**. This adds first/last/parent names, the self-service **My Bookings** flow, email support, and per-year revenue. **Watch for a NOTICE about the reminder cron** — it's expected until you finish the email setup (next section); the rest of the migration still applies. The confirmation/reminder/code **emails only work once you set up the Edge Function** below.
+7. Same again for `supabase/migration_security.sql` → **Run** (security hardening), then `supabase/migration_v5.sql` → **Run** (slot editing).
+8. Same again for `supabase/migration_v6.sql` → **Run**. This adds the late-cancellation monitor, the admin **Team** tab, admin slot reopen, the hour×day revenue grid, and **multi-slot booking with email verification**. ⚠️ v6 **replaces the booking RPC** (`book_slot` → `book_slots` with a verification code): run it and push the updated `book.html` **at the same time**, and redeploy the `emails` Edge Function — an old page against a new database (or vice-versa) can't take bookings.
+9. **Verify it worked:** paste `supabase/verify_v6.sql` into the SQL Editor → **Run** → read the `NOTICE` lines (every check prints PASS or FAIL; all test data is rolled back automatically). For an end-to-end check with real logins, see `supabase/verify_v6_api.mjs` (header comment explains usage).
 6. **Allowlist your staff.** Anyone with a Google account can *sign in*, but only emails in the `staff_emails` table can use the dashboard (enforced in the database, not just the UI). In the SQL Editor:
    ```sql
    insert into public.staff_emails (email) values
@@ -156,13 +164,13 @@ Either way, share `<your-site>/book.html` in your WeChat group, and make sure `<
 ## How client data is protected
 
 - **Bookings are invisible to the public.** Row Level Security blocks all anonymous reads of the bookings table — customer emails/phones are only visible to logged-in staff.
-- **Booking happens only through a locked-down database function** that validates the email/phone, limits each email to 3 upcoming bookings (anti-spam), and uses a row lock + unique index so two people can never book the same slot, even clicking at the same instant.
+- **Booking happens only through a locked-down database function.** `book_slots()` validates the email/phone, **requires a 6-digit emailed verification code** (or a 24-hour token from a previous verification), limits each email to 8 upcoming bookings (anti-spam), books up to 8 lessons atomically (all-or-nothing), and uses row locks + a unique index so two people can never book the same slot, even clicking at the same instant.
 - **Cancellations use a private token** shown once after booking — no one can cancel (or discover) someone else's booking.
 - **Anyone can sign in with Google, but only allowlisted staff get access.** Every Row Level Security policy checks the signed-in email against the `staff_emails` table (via the `is_staff()` database function), so a random Google account can't read bookings or touch pools/slots even by calling the API directly. The dashboard also signs such accounts out with "This account is not authorized as staff."
-- **Client records are staff-only.** The `clients` table has no anonymous access at all; rows are created only inside the `book_slot` function. Only admins can edit or delete clients — deleting anonymizes the client's past bookings instead of erasing history.
+- **Client records are staff-only.** The `clients` table has no anonymous access at all; rows are created only inside the `book_slots` function. Only admins can edit or delete clients — deleting anonymizes the client's past bookings instead of erasing history.
 - **Booked slots are publicly visible, but only the slot.** The public calendar shows booked times greyed out (time/pool/coach only) so customers see the schedule shape — booking details, names, emails and phones stay staff-only.
 - **Coaches manage only their own lessons.** Row Level Security lets a coach cancel only slots/bookings where they are the assigned coach; admins can cancel anything. Hiding the buttons is cosmetic — the database enforces it.
-- **No double-booking the same time.** `book_slot` rejects a booking if that email already has a confirmed lesson overlapping the requested time.
+- **No double-booking the same time.** `book_slots` rejects a booking if that email already has a confirmed lesson overlapping the requested time — including overlaps *within* the set of lessons being booked together.
 - **Only a first name + last initial is public.** Booked slots show e.g. "Jane D." via a single `slots.booked_by_display` column — never the full last name, parent/guardian name, email, or phone. The parent/guardian name is staff-only and has no public read path.
 - **Self-service bookings are gated by an emailed code.** `My Bookings` sends a 6-digit code (hashed, 10-min expiry, rate-limited, max 5 attempts); only after it matches does `verify_and_list_bookings()` return that email's own lessons. Anonymous users still cannot read the bookings or clients tables directly.
 - **Revenue is admins-only, enforced in the database.** Slot prices have no API read permission for anyone (column-level grants), and revenue comes only from `get_revenue_report()`, which raises an error unless the caller's profile has `role = 'admin'`. Coaches can set a price when publishing slots but can't read prices back in bulk, and the `role` column itself can't be written through the API.
@@ -172,11 +180,20 @@ Either way, share `<your-site>/book.html` in your WeChat group, and make sure `<
 
 Every week: staff open **Publish Slots**, enter that week's times per pool, done. Customers rebook from the same link. You can also duplicate a whole week quickly by re-entering the same form with a new date.
 
+## Staff dashboard cheat-sheet (v6)
+
+- **Clients tab** shows a **Late cancels** count — cancellations made less than 24h before the lesson get an amber badge (red at 3+), and each late-cancelled booking in a client's history or the History tab shows how far in advance it was cancelled (e.g. "Cancelled 5h before"). Purely informational: nothing blocks a client from cancelling.
+- **Team tab (admins)** edits any coach's name, bio, photo, visibility, and role. Promoting/demoting is instant; demoting the **last** admin is blocked by the database.
+- **Export week (CSV)** on the calendar downloads the displayed week as an hours log (times in the pool's timezone) with per-coach booked/open hour totals — any staff member can use it.
+- **Reopen (admins)**: cancelled *future* slots get a Reopen button in the History tab.
+- **Revenue tab (admins)** starts with the hour-of-day × day-of-week grid (like the paper sheet) with row/column/grand totals and its own CSV export; the by-week/coach/pool summaries are below it.
+- **Coaches** publish/edit/cancel only their own slots; admins do all of this for anyone, including creating slots assigned to any coach.
+
 ## Ideas for later
 
 - **Email confirmations:** add a Supabase Edge Function + free [Resend](https://resend.com) account to auto-email the cancel link.
 - **Coach photos:** add a `photo_url` column to `profiles` and an `<img>` in `index.html`.
-- **Group lessons:** add a `capacity` column to slots and adjust `book_slot` to count bookings instead of flipping status.
+- **Group lessons:** add a `capacity` column to slots and adjust `book_slots` to count bookings instead of flipping status.
 - **Chinese translation:** duplicate `book.html` as `book-zh.html` for the WeChat group.
 
 ## Troubleshooting
@@ -186,7 +203,10 @@ Every week: staff open **Publish Slots**, enter that week's times per pool, done
 - **"This account is not authorized as staff"** → that email isn't in `staff_emails`. Add it in the SQL Editor (must match the Google account's email exactly, case doesn't matter).
 - **"Could not verify staff access"** → `supabase/migration_google_auth.sql` hasn't been run on this project.
 - **"Could not load settings" / empty Clients tab** → `supabase/migration_clients_revenue.sql` hasn't been run.
-- **No Revenue tab after signing in** → your profile isn't an admin yet; run the `update public.profiles set role='admin'…` SQL from setup step 1.6.
+- **No Revenue tab after signing in** → your profile isn't an admin yet; run the `update public.profiles set role='admin'…` SQL from setup step 1.6 (or have an existing admin promote you in the **Team** tab).
+- **Booking fails with "Could not find the function … book_slots"** → `supabase/migration_v6.sql` hasn't been run on this project.
+- **Booking fails with "verify your email"** even after entering a code → the code expired (10 min) or 5 wrong attempts locked it; request a fresh one.
+- **"function book_slot does not exist" from an old page** → the deployed `book.html` is older than the database; push the current frontend (v6 replaced `book_slot` with `book_slots`).
 - **My Bookings never emails a code / booking sends no confirmation** → the `emails` Edge Function isn't set up. Do section **3b**. Test with the `curl` command there; a `RESEND_API_KEY not set` error means the secret is missing.
 - **Reminders never arrive** → confirm `pg_cron`/`pg_net` are enabled (Database → Extensions) and that you replaced `__CRON_SECRET__` in `migration_v4.sql` with the real value and re-ran that block. `select * from cron.job;` should list `ksj-lesson-reminders`.
 - **Google button bounces back to the login page** → the page's URL isn't in **Authentication → URL Configuration → Additional Redirect URLs** (see step 2c), or the provider isn't enabled.

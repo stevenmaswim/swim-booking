@@ -137,29 +137,50 @@ async function handleOtp(body: { email?: string }) {
   return json({ ok: true });
 }
 
-// ---------- Confirmation ----------
-async function handleConfirmation(body: { booking_id?: string }) {
-  const id = String(body.booking_id ?? "");
-  if (!id) return json({ error: "booking_id required" }, 400);
-  const { data: b, error } = await sb.from("bookings")
-    .select("email, first_name, student_name, cancel_token, slots(starts_at, duration_min, pools(name, address), profiles!coach_id(display_name))")
-    .eq("id", id).single();
-  if (error || !b) return json({ error: error?.message ?? "not found" }, 404);
+// ---------- Confirmation (one booking or a whole multi-slot set) ----------
+async function handleConfirmation(body: { booking_id?: string; booking_ids?: string[] }) {
+  const ids = (Array.isArray(body.booking_ids) && body.booking_ids.length
+    ? body.booking_ids
+    : body.booking_id ? [body.booking_id] : []).map(String).slice(0, 8);
+  if (!ids.length) return json({ error: "booking_id(s) required" }, 400);
 
-  const slot: any = b.slots;
-  const cancelUrl = `${SITE_URL}/book.html?cancel=${b.cancel_token}`;
+  const { data, error } = await sb.from("bookings")
+    .select("email, first_name, student_name, cancel_token, slots(starts_at, duration_min, pools(name, address), profiles!coach_id(display_name))")
+    .in("id", ids);
+  if (error || !data?.length) return json({ error: error?.message ?? "not found" }, 404);
+
+  // One email per call: all listed lessons must belong to the same address
+  // (book_slots guarantees this; drop anything else defensively).
+  const email = (data[0] as any).email;
+  const rows = (data as any[])
+    .filter((b) => b.email === email)
+    .sort((a, b) => String(a.slots.starts_at).localeCompare(String(b.slots.starts_at)));
+  const first = rows[0];
   const myUrl = `${SITE_URL}/mybookings.html`;
-  await sendEmail(b.email, "Your KSJ Swimming lesson is booked ✅", shell(`
-    <p>Hi ${esc(b.first_name || "there")}, your lesson is confirmed:</p>
-    <table style="font-size:0.95rem;">
+  const n = rows.length;
+
+  const lessonRow = (b: any) => {
+    const slot = b.slots;
+    const cancelUrl = `${SITE_URL}/book.html?cancel=${b.cancel_token}`;
+    return `
+    <table style="font-size:0.95rem;margin-bottom:6px;">
       <tr><td style="padding:2px 10px 2px 0;color:#64748b;">When</td><td><strong>${esc(fmtWhen(slot.starts_at))}</strong> (${slot.duration_min} min)</td></tr>
       <tr><td style="padding:2px 10px 2px 0;color:#64748b;">Pool</td><td>${esc(slot.pools?.name || "")}${slot.pools?.address ? " — " + esc(slot.pools.address) : ""}</td></tr>
       <tr><td style="padding:2px 10px 2px 0;color:#64748b;">Coach</td><td>${esc(slot.profiles?.display_name || "TBD")}</td></tr>
+      <tr><td style="padding:2px 10px 2px 0;color:#64748b;"></td><td style="font-size:0.85rem;"><a href="${cancelUrl}" style="color:#64748b;">Cancel this lesson</a></td></tr>
     </table>
+    ${n > 1 ? '<hr style="border:none;border-top:1px dashed #e2e8f0;margin:10px 0;">' : ""}`;
+  };
+
+  await sendEmail(email,
+    n === 1 ? "Your KSJ Swimming lesson is booked ✅"
+            : `Your ${n} KSJ Swimming lessons are booked ✅`,
+    shell(`
+    <p>Hi ${esc(first.first_name || "there")}, your ${n === 1 ? "lesson is" : `${n} lessons are`} confirmed:</p>
+    ${rows.map(lessonRow).join("")}
     <p style="margin-top:18px;">
       <a href="${myUrl}" style="background:#0369a1;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;">View my bookings</a>
     </p>
-    <p style="margin-top:14px;color:#64748b;font-size:0.9rem;">Need to cancel? <a href="${cancelUrl}">Cancel this lesson</a>.</p>
   `));
   return json({ ok: true });
 }

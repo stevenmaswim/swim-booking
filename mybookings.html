@@ -101,14 +101,17 @@
       btn.disabled = true; btn.textContent = 'Checking…';
       const { data, error } = await db.rpc('verify_and_list_bookings', { p_email: verifiedEmail, p_code: code });
       btn.disabled = false; btn.textContent = 'View my bookings';
-      if (error) { showMsg('codeMsg', error.message, 'error'); return; }
+      // A wrong code comes back as data.error (not an exception) so the
+      // server's attempt counter actually persists — see migration_v6.sql.
+      const emsg = error ? error.message : (data && data.error);
+      if (emsg) { showMsg('codeMsg', emsg, 'error'); return; }
       verifiedCode = code;
       renderBookings(data.bookings || []);
     }
 
     async function refresh() {
       const { data, error } = await db.rpc('verify_and_list_bookings', { p_email: verifiedEmail, p_code: verifiedCode });
-      if (!error) renderBookings(data.bookings || []);
+      if (!error && data && !data.error) renderBookings(data.bookings || []);
     }
 
     function renderBookings(bookings) {
