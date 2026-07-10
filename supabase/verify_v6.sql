@@ -165,16 +165,38 @@ begin
   end;
 
   -- ==================== B. cancelled_at + display triggers ====================
+  -- B1: the trigger stamps the cancellation moment (≈ now)
   update public.bookings set status = 'cancelled'
   where slot_id = '44444444-4444-4444-4444-444444440001';
   select bo.cancelled_at, s.starts_at into b
   from public.bookings bo join public.slots s on s.id = bo.slot_id
   where bo.slot_id = '44444444-4444-4444-4444-444444440001';
-  if b.cancelled_at is not null and b.starts_at - b.cancelled_at < interval '24 hours' then
-    rep := rep || E'\nPASS  B1: cancelled_at auto-set; this one is late (<24h before start)'; npass := npass + 1;
+  if b.cancelled_at is not null and abs(extract(epoch from (now() - b.cancelled_at))) < 60 then
+    rep := rep || E'\nPASS  B1: cancelled_at auto-set to the cancellation moment'; npass := npass + 1;
   else
     rep := rep || E'\nFAIL  B1: cancelled_at=' || coalesce(b.cancelled_at::text, 'null'); nfail := nfail + 1;
   end if;
+
+  -- B1b/B1c: the late-cancel boundary — a lesson 5h out cancels "late",
+  -- a lesson 3 days out does not (spec VERIFY item, checked in the DB).
+  insert into public.slots (id, pool_id, coach_id, starts_at, duration_min, price, status, created_by) values
+    ('44444444-4444-4444-4444-444444440094', v_pool, v_coach, now() + interval '5 hours', 60, 50, 'booked', v_coach),
+    ('44444444-4444-4444-4444-444444440095', v_pool, v_coach, now() + interval '3 days',  60, 50, 'booked', v_coach);
+  insert into public.bookings (slot_id, student_name, email, phone) values
+    ('44444444-4444-4444-4444-444444440094', 'Late Kid', 'vtest-late@example.com', '2045550001'),
+    ('44444444-4444-4444-4444-444444440095', 'Fine Kid', 'vtest-fine@example.com', '2045550002');
+  update public.bookings set status = 'cancelled'
+  where slot_id in ('44444444-4444-4444-4444-444444440094', '44444444-4444-4444-4444-444444440095');
+  select (s.starts_at - bo.cancelled_at < interval '24 hours') as is_late into b
+  from public.bookings bo join public.slots s on s.id = bo.slot_id
+  where bo.slot_id = '44444444-4444-4444-4444-444444440094';
+  if b.is_late then rep := rep || E'\nPASS  B1b: cancel 5h before start classifies as late (<24h)'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  B1b: 5h-before cancel not classified late'; nfail := nfail + 1; end if;
+  select (s.starts_at - bo.cancelled_at < interval '24 hours') as is_late into b
+  from public.bookings bo join public.slots s on s.id = bo.slot_id
+  where bo.slot_id = '44444444-4444-4444-4444-444444440095';
+  if not b.is_late then rep := rep || E'\nPASS  B1c: cancel 3 days before start is NOT late'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  B1c: 3d-before cancel wrongly classified late'; nfail := nfail + 1; end if;
   update public.slots set status = 'open' where id = '44444444-4444-4444-4444-444444440001';
   if (select booked_by_display from public.slots where id = '44444444-4444-4444-4444-444444440001') is null then
     rep := rep || E'\nPASS  B2: booked_by_display cleared on reopen'; npass := npass + 1;
