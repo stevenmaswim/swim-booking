@@ -328,6 +328,14 @@ begin
     if v >= 150 then rep := rep || E'\nPASS  E1: revenue grid readable by admin ($' || v || ' ≥ $150 test lessons)'; npass := npass + 1;
     else rep := rep || E'\nFAIL  E1: grid total $' || v || ' (expected ≥ the 3 × $50 test bookings)'; nfail := nfail + 1; end if;
 
+    -- E1b (v7): every cell carries the per-coach breakdown
+    if (select bool_and(c->'coaches' is not null and json_array_length(c->'coaches') >= 1)
+        from json_array_elements(r->'cells') c) then
+      rep := rep || E'\nPASS  E1b: per-coach breakdown present in every cell (v7)'; npass := npass + 1;
+    else
+      rep := rep || E'\nFAIL  E1b: cells missing the coaches breakdown — has migration_v7.sql been run?'; nfail := nfail + 1;
+    end if;
+
     -- E2: edit another coach's profile + promote/demote round trip
     r := public.admin_update_profile(v_coach, 'VTest Coach Renamed', 'new bio', false, 'admin');
     if (select role from public.profiles where id = v_coach) = 'admin'

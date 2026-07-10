@@ -10,12 +10,25 @@
     /* Late-cancellation monitor (informational badges) */
     .badge.late  { background: #fef3c7; color: #92400e; }
     .badge.late3 { background: #fee2e2; color: #991b1b; }
+    .cxl-when { font-size: 0.78rem; margin-top: 2px; white-space: nowrap; }
     /* Revenue hour × day grid */
     .revgrid { border-collapse: collapse; font-size: 0.85rem; }
     .revgrid th, .revgrid td { border: 1px solid #e2e8f0; padding: 4px 8px; text-align: right; white-space: nowrap; }
     .revgrid th { background: #f1f5f9; }
-    .revgrid td.has { background: #e0f2fe; }
+    .revgrid td.has { background: #e0f2fe; cursor: default; }
     .revgrid .tot { font-weight: 700; background: #f8fafc; }
+    /* Per-coach breakdown tooltip (hover on desktop, tap on touch) */
+    .rgtip {
+      position: fixed; z-index: 120; display: none;
+      background: #0f172a; color: #f1f5f9; border-radius: 8px;
+      padding: 8px 12px; font-size: 0.82rem; line-height: 1.5;
+      box-shadow: 0 6px 18px rgba(2, 6, 23, 0.35);
+      pointer-events: none; max-width: 280px; white-space: nowrap;
+    }
+    .rgtip .rgtip-total { border-top: 1px solid #334155; margin-top: 5px; padding-top: 4px; font-weight: 700; }
+    /* Calendar: per-coach hours for the displayed week */
+    #coachHours { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-bottom: 10px; font-size: 0.85rem; }
+    #coachHours .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; vertical-align: baseline; }
     /* Team tab */
     .team-card { display: flex; gap: 14px; align-items: flex-start; }
     .team-card img, .team-card .coach-avatar { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; }
@@ -80,6 +93,7 @@
         <div id="poolLegend"></div>
         <button class="btn small secondary" id="weekExport" type="button" title="Hours log for the displayed week, in the pool's timezone">&#11015; Export week (CSV)</button>
       </div>
+      <div id="coachHours"></div>
       <div class="msg" id="weekExportMsg"></div>
       <div class="cal-wrap"><div class="cal" id="calGrid"></div></div>
     </div>
@@ -392,12 +406,38 @@
       const ms = new Date(startsAt) - new Date(booking.cancelled_at);
       return ms < 24 * 3600e3 ? ms : null;
     }
-    function lateCancelBadge(ms) {
-      if (ms == null) return '';
-      const label = ms < 0 ? 'after start'
-        : ms >= 3600e3 ? Math.floor(ms / 3600e3) + 'h before'
-        : Math.max(1, Math.round(ms / 60000)) + 'm before';
-      return ` <span class="badge late" title="Cancelled less than 24 hours before the lesson">Cancelled &lt;24h — ${label}</span>`;
+    // When was it cancelled? Timestamps in the pool's timezone; the tooltip
+    // carries seconds + the precise lead time. NULL cancelled_at = the row
+    // predates migration_v6 — say so instead of guessing.
+    function fmtCancelShort(iso) {
+      return new Date(iso).toLocaleString('en-US', {
+        timeZone: BUSINESS_TIMEZONE, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+      });
+    }
+    function cancelDetailTitle(b, startsAt) {
+      const full = new Date(b.cancelled_at).toLocaleString('en-US', {
+        timeZone: BUSINESS_TIMEZONE, weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
+        hour: 'numeric', minute: '2-digit', second: '2-digit', timeZoneName: 'short'
+      });
+      if (!startsAt) return full;
+      const ms = new Date(startsAt) - new Date(b.cancelled_at);
+      if (ms < 0) return full + ' · after lesson start';
+      const h = Math.floor(ms / 3600e3), m = Math.floor(ms % 3600e3 / 60000);
+      return full + ' · ' + (h ? h + 'h ' : '') + m + 'm before lesson';
+    }
+    function cancelledWhenHtml(b, startsAt) {
+      if (!b || b.status !== 'cancelled') return '';
+      if (!b.cancelled_at) return '<div class="cxl-when muted">Cancelled (time unknown)</div>';
+      const when = fmtCancelShort(b.cancelled_at);
+      const title = escAttr(cancelDetailTitle(b, startsAt));
+      const ms = lateCancelMs(b, startsAt);
+      if (ms != null) {   // late: one amber badge carries both facts
+        const label = ms < 0 ? 'after start'
+          : ms >= 3600e3 ? Math.floor(ms / 3600e3) + 'h before'
+          : Math.max(1, Math.round(ms / 60000)) + 'm before';
+        return ` <span class="badge late" title="${title}">Cancelled &lt;24h — ${label} (${when})</span>`;
+      }
+      return `<div class="cxl-when muted" title="${title}">Cancelled ${when}</div>`;
     }
 
     // ================= Auth =================
@@ -558,6 +598,8 @@
           <span style="width:11px;height:11px;border-radius:3px;background:${poolColor(p.id)};display:inline-block;"></span>
           ${esc(p.name)}</span>`).join('');
 
+      renderCoachHours(sl.data || []);
+
       const grid = document.getElementById('calGrid');
       let html = '<div class="head"></div>';
       const days = [];
@@ -602,6 +644,31 @@
           () => openSlotModal(s));
       });
     }
+    // Per-coach hours for the DISPLAYED week, from the same slots the
+    // calendar just fetched (schedule data — visible to all staff).
+    // Booked = slots with a confirmed booking; open = published, unbooked.
+    // Cancelled slots were excluded by the fetch. Zero-slot coaches omitted.
+    function coachColor(name) {
+      const i = coaches.findIndex(c => c.display_name === name);
+      return i < 0 ? '#94a3b8' : POOL_COLORS[i % POOL_COLORS.length];
+    }
+    function fmtHours(min) { return (min / 60).toFixed(1).replace(/\.0$/, '') + 'h'; }
+    function renderCoachHours(slots) {
+      const el = document.getElementById('coachHours');
+      const byCoach = {};
+      slots.forEach(s => {
+        const name = s.profiles?.display_name || 'Unassigned';
+        const o = byCoach[name] = byCoach[name] || { booked: 0, open: 0 };
+        if (s.status === 'booked') o.booked += s.duration_min;
+        else if (s.status === 'open') o.open += s.duration_min;
+      });
+      el.innerHTML = Object.keys(byCoach).sort().map(name => {
+        const o = byCoach[name];
+        return `<span><span class="dot" style="background:${coachColor(name)};"></span>` +
+          `<strong>${esc(name)}</strong>: ${fmtHours(o.booked)} booked · ${fmtHours(o.open)} open</span>`;
+      }).join('');
+    }
+
     document.getElementById('calPrev').onclick = () => { calStart.setDate(calStart.getDate() - 7); renderCalendar(); };
     document.getElementById('calNext').onclick = () => { calStart.setDate(calStart.getDate() + 7); renderCalendar(); };
 
@@ -891,7 +958,7 @@
           <td>${esc(b.student_name)}</td>
           <td>${esc(b.slots?.pools?.name || '')}</td>
           <td>${esc(b.slots?.profiles?.display_name || '—')}</td>
-          <td><span class="badge ${b.status === 'confirmed' ? 'booked' : 'cancelled'}">${b.status}</span>${lateCancelBadge(lateCancelMs(b, b.slots?.starts_at))}</td>
+          <td><span class="badge ${b.status === 'confirmed' ? 'booked' : 'cancelled'}">${b.status}</span>${cancelledWhenHtml(b, b.slots?.starts_at)}</td>
         </tr>`).join('') + '</table>';
     }
 
@@ -1250,7 +1317,7 @@
           const rev = c ? Number(c.revenue) : 0;
           rowTot += rev; colTot[dow] += rev;
           row += c
-            ? `<td class="has" title="${c.lessons} lesson${c.lessons === 1 ? '' : 's'}">${money(rev)}</td>`
+            ? `<td class="has" data-rg="${h}-${dow}">${money(rev)}</td>`
             : '<td></td>';
         }
         grand += rowTot;
@@ -1260,7 +1327,50 @@
         RG_DAYS.map((_, i) => `<td class="tot">${colTot[i + 1] ? money(colTot[i + 1]) : ''}</td>`).join('') +
         `<td class="tot">${money(grand)}</td></tr></table>`;
       el.innerHTML = html;
+
+      // Per-coach tooltip: hover shows/follows, click/tap pins & toggles.
+      el.querySelectorAll('td[data-rg]').forEach(td => {
+        const cell = map[td.dataset.rg];
+        td.addEventListener('mousemove', (e) => { if (!rgTipPinned) showRgTip(cell, e.clientX, e.clientY); });
+        td.addEventListener('mouseleave', () => { if (!rgTipPinned) hideRgTip(); });
+        td.addEventListener('click', (e) => {
+          e.stopPropagation(); // the document listener below dismisses
+          if (rgTipPinned === td.dataset.rg) { rgTipPinned = null; hideRgTip(); }
+          else { rgTipPinned = td.dataset.rg; showRgTip(cell, e.clientX, e.clientY); }
+        });
+      });
     }
+
+    // ---- revenue-grid tooltip (one shared element, viewport-clamped) ----
+    let rgTipEl = null, rgTipPinned = null;
+    function rgTip() {
+      if (!rgTipEl) {
+        rgTipEl = document.createElement('div');
+        rgTipEl.className = 'rgtip';
+        document.body.appendChild(rgTipEl);
+      }
+      return rgTipEl;
+    }
+    function showRgTip(cell, x, y) {
+      if (!cell) return;
+      const tip = rgTip();
+      tip.innerHTML = (cell.coaches || []).map(co =>
+        `<div>${esc(co.coach)} — ${co.lessons} lesson${co.lessons === 1 ? '' : 's'}, ${money(co.revenue)}</div>`
+      ).join('') +
+      `<div class="rgtip-total">Total: ${cell.lessons} lesson${cell.lessons === 1 ? '' : 's'}, ${money(cell.revenue)}</div>`;
+      tip.style.display = 'block';
+      // measure, then clamp inside the viewport (flip above/left of the
+      // cursor when the default below-right position would overflow)
+      const w = tip.offsetWidth, hgt = tip.offsetHeight, pad = 8, off = 14;
+      let left = x + off, top = y + off;
+      if (left + w > window.innerWidth - pad) left = Math.max(pad, x - w - off);
+      if (top + hgt > window.innerHeight - pad) top = Math.max(pad, y - hgt - off);
+      tip.style.left = left + 'px';
+      tip.style.top = top + 'px';
+    }
+    function hideRgTip() { if (rgTipEl) rgTipEl.style.display = 'none'; }
+    // tap/click anywhere else dismisses a pinned tooltip
+    document.addEventListener('click', () => { rgTipPinned = null; hideRgTip(); });
     document.getElementById('rgRange').onchange = () => {
       const c = document.getElementById('rgRange').value === 'custom';
       document.querySelectorAll('.rgCustom').forEach(e => e.style.display = c ? '' : 'none');
@@ -1433,7 +1543,7 @@
             <td>${esc(s.pools?.name || '')}</td>
             <td>${esc(s.profiles?.display_name || '—')}</td>
             <td>${esc(who) || '—'}</td>
-            <td><span class="badge ${s.status === 'booked' ? 'booked' : s.status === 'cancelled' ? 'cancelled' : 'open'}">${esc(s.status)}</span>${b && b.status === 'cancelled' ? lateCancelBadge(lateCancelMs(b, s.starts_at)) : ''}</td>
+            <td><span class="badge ${s.status === 'booked' ? 'booked' : s.status === 'cancelled' ? 'cancelled' : 'open'}">${esc(s.status)}</span>${b ? cancelledWhenHtml(b, s.starts_at) : ''}</td>
             <td>${canReopen ? `<button class="btn small secondary" data-reopen="${s.id}">Reopen</button>` : ''}</td>
           </tr>`;
         }).join('') + '</table>';

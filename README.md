@@ -19,7 +19,8 @@ A booking site with no payment infrastructure. Customers with the link book a le
 | `supabase/migration_v4.sql` | First/last/parent names, self-service bookings, emails, per-year revenue |
 | `supabase/migration_security.sql` | Security hardening (run after v4) |
 | `supabase/migration_v5.sql` | Slot editing + history/export support |
-| `supabase/migration_v6.sql` | Late-cancel monitor, admin Team management, admin slot reopen, hour×day revenue grid, multi-slot booking with email verification (run last) |
+| `supabase/migration_v6.sql` | Late-cancel monitor, admin Team management, admin slot reopen, hour×day revenue grid, multi-slot booking with email verification |
+| `supabase/migration_v7.sql` | Revenue grid cells gain a per-coach breakdown (run last) |
 | `supabase/verify_v6.sql` | Post-migration test suite for the SQL Editor — reports PASS/FAIL in a deliberate final "error", rolls everything back |
 | `supabase/verify_v6_api.mjs` | Permission checks against the live REST API with real staff JWTs |
 | `supabase/functions/emails/` | Edge Function that sends confirmation, reminder, and login-code emails via Resend |
@@ -37,7 +38,8 @@ A booking site with no payment infrastructure. Customers with the link book a le
 6. Same again for `supabase/migration_v4.sql` → **Run**. This adds first/last/parent names, the self-service **My Bookings** flow, email support, and per-year revenue. **Watch for a NOTICE about the reminder cron** — it's expected until you finish the email setup (next section); the rest of the migration still applies. The confirmation/reminder/code **emails only work once you set up the Edge Function** below.
 7. Same again for `supabase/migration_security.sql` → **Run** (security hardening), then `supabase/migration_v5.sql` → **Run** (slot editing).
 8. Same again for `supabase/migration_v6.sql` → **Run**. This adds the late-cancellation monitor, the admin **Team** tab, admin slot reopen, the hour×day revenue grid, and **multi-slot booking with email verification**. ⚠️ v6 **replaces the booking RPC** (`book_slot` → `book_slots` with a verification code): run it and push the updated `book.html` **at the same time**, and redeploy the `emails` Edge Function — an old page against a new database (or vice-versa) can't take bookings.
-9. **Verify it worked:** paste `supabase/verify_v6.sql` into the SQL Editor → **Run**. The run **ends in an ERROR on purpose** — the error message *is* the report (the editor hides notices, and erroring out forces Postgres to roll back all the test data). Read the PASS/FAIL lines in it; the first line is the summary. For an end-to-end check with real logins, see `supabase/verify_v6_api.mjs` (header comment explains usage).
+9. Same again for `supabase/migration_v7.sql` → **Run**. Each revenue-grid cell now includes a per-coach breakdown (shown as a hover/tap tooltip in the Revenue tab). Frontend-only additions ride along in `staff.html`: per-coach booked/open hours under the calendar legend, and cancellation timestamps on cancelled bookings.
+10. **Verify it worked:** paste `supabase/verify_v6.sql` into the SQL Editor → **Run**. The run **ends in an ERROR on purpose** — the error message *is* the report (the editor hides notices, and erroring out forces Postgres to roll back all the test data). Read the PASS/FAIL lines in it; the first line is the summary. For an end-to-end check with real logins, see `supabase/verify_v6_api.mjs` (header comment explains usage).
 6. **Allowlist your staff.** Anyone with a Google account can *sign in*, but only emails in the `staff_emails` table can use the dashboard (enforced in the database, not just the UI). In the SQL Editor:
    ```sql
    insert into public.staff_emails (email) values
@@ -182,11 +184,12 @@ Every week: staff open **Publish Slots**, enter that week's times per pool, done
 
 ## Staff dashboard cheat-sheet (v6)
 
-- **Clients tab** shows a **Late cancels** count — cancellations made less than 24h before the lesson get an amber badge (red at 3+), and each late-cancelled booking in a client's history or the History tab shows how far in advance it was cancelled (e.g. "Cancelled 5h before"). Purely informational: nothing blocks a client from cancelling.
+- **Clients tab** shows a **Late cancels** count — cancellations made less than 24h before the lesson get an amber badge (red at 3+). Every cancelled booking in a client's history or the History tab shows **when** it was cancelled in the pool's timezone (late ones as "Cancelled <24h — 5h before (Jul 9, 10:12 PM)"; pre-v6 rows show "time unknown"), with a tooltip carrying the exact time and lead. Purely informational: nothing blocks a client from cancelling.
 - **Team tab (admins)** edits any coach's name, bio, photo, visibility, and role. Promoting/demoting is instant; demoting the **last** admin is blocked by the database.
 - **Export week (CSV)** on the calendar downloads the displayed week as an hours log (times in the pool's timezone) with per-coach booked/open hour totals — any staff member can use it.
 - **Reopen (admins)**: cancelled *future* slots get a Reopen button in the History tab.
-- **Revenue tab (admins)** starts with the hour-of-day × day-of-week grid (like the paper sheet) with row/column/grand totals and its own CSV export; the by-week/coach/pool summaries are below it.
+- **Revenue tab (admins)** starts with the hour-of-day × day-of-week grid (like the paper sheet) with row/column/grand totals and its own CSV export; hovering (or tapping) a cell shows each coach's share of it. The by-week/coach/pool summaries are below.
+- **Calendar** shows each coach's booked/open hours for the displayed week under the pool legend (e.g. "Kevin Li: 6.5h booked · 2h open") — schedule data, visible to all staff.
 - **Coaches** publish/edit/cancel only their own slots; admins do all of this for anyone, including creating slots assigned to any coach.
 
 ## Ideas for later
