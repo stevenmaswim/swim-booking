@@ -11,6 +11,9 @@
     .badge.late  { background: #fef3c7; color: #92400e; }
     .badge.late3 { background: #fee2e2; color: #991b1b; }
     .cxl-when { font-size: 0.78rem; margin-top: 2px; white-space: nowrap; }
+    /* Calendar blocks stay readable when lanes get narrow: the time is
+       always visible; pool text truncates. Full details in title + modal. */
+    .cal-block .cb-line { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     /* Revenue hour × day grid */
     .revgrid { border-collapse: collapse; font-size: 0.85rem; }
     .revgrid th, .revgrid td { border: 1px solid #e2e8f0; padding: 4px 8px; text-align: right; white-space: nowrap; }
@@ -618,7 +621,7 @@
       });
       grid.innerHTML = html;
 
-      function place(dayIdx, startMin, endMin, cls, style, text, title, onclick) {
+      function place(dayIdx, startMin, endMin, cls, style, text, title, onclick, slotId) {
         const col = grid.querySelector(`.day-col[data-day="${dayIdx}"]`);
         if (!col) return;
         const top = Math.max(0, (startMin - DAY_START * 60) / 60 * HOUR_PX);
@@ -627,21 +630,50 @@
         el.className = 'cal-block ' + cls;
         el.style.cssText = `top:${top}px;height:${h}px;${style}`;
         el.innerHTML = text; el.title = title;
+        if (slotId) el.dataset.slotId = slotId;
         if (onclick) el.onclick = onclick;
         col.appendChild(el);
       }
 
+      // Concurrent lessons must sit SIDE BY SIDE, not stack invisibly:
+      // group each day's blocks into overlap clusters ([start, end) ranges
+      // intersecting, transitively) and split the 40%→100% band into one
+      // lane per member. Lane order is deterministic (coach name, then
+      // start time) so blocks don't shuffle between renders. Partial
+      // overlaps use the cluster-wide split — correct clicks over
+      // pixel-perfect widths.
+      const dayBlocks = {};
       (sl.data || []).forEach(s => {
         const st = new Date(s.starts_at);
         const dayIdx = Math.floor((st - calStart) / 86400000);
         const startMin = st.getHours() * 60 + st.getMinutes();
-        place(dayIdx, startMin, startMin + s.duration_min,
-          s.status === 'open' ? 'slot-open' : 'slot-booked',
-          `left:40%;z-index:2;border-left-color:${poolColor(s.pool_id)};`,
-          `${fmtTime(st)}<br>${esc(s.pools?.name || '')}`,
-          `${s.status.toUpperCase()} — ${fmtTime(st)} ${s.pools?.name || ''}` +
-          (s.profiles ? ' · ' + s.profiles.display_name : ''),
-          () => openSlotModal(s));
+        (dayBlocks[dayIdx] = dayBlocks[dayIdx] || [])
+          .push({ s, st, startMin, endMin: startMin + s.duration_min });
+      });
+      Object.keys(dayBlocks).forEach(dayIdx => {
+        const blocks = dayBlocks[dayIdx].sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
+        const clusters = [];
+        let cur = null, curEnd = -1;
+        blocks.forEach(b => {              // sweep: a gap ends the cluster
+          if (!cur || b.startMin >= curEnd) { cur = []; clusters.push(cur); curEnd = b.endMin; }
+          else curEnd = Math.max(curEnd, b.endMin);
+          cur.push(b);
+        });
+        clusters.forEach(cluster => {
+          cluster.sort((a, b) =>
+            (a.s.profiles?.display_name || '').localeCompare(b.s.profiles?.display_name || '') ||
+            a.startMin - b.startMin);
+          const w = 60 / cluster.length;   // blocks occupy the 40%..100% band
+          cluster.forEach((b, i) => {
+            place(+dayIdx, b.startMin, b.endMin,
+              b.s.status === 'open' ? 'slot-open' : 'slot-booked',
+              `left:${(40 + i * w).toFixed(3)}%;right:auto;width:calc(${w.toFixed(3)}% - 2px);z-index:2;border-left-color:${poolColor(b.s.pool_id)};`,
+              `<span class="cb-line">${fmtTime(b.st)}</span><span class="cb-line">${esc(b.s.pools?.name || '')}</span>`,
+              `${b.s.status.toUpperCase()} — ${fmtTime(b.st)} ${b.s.pools?.name || ''}` +
+              (b.s.profiles ? ' · ' + b.s.profiles.display_name : ''),
+              () => openSlotModal(b.s), b.s.id);
+          });
+        });
       });
     }
     // Per-coach hours for the DISPLAYED week, from the same slots the
