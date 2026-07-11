@@ -24,6 +24,8 @@
     .verify-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
     .verify-row > div { flex: 1; min-width: 140px; }
     .verified-note { color: #15803d; font-weight: 600; font-size: 0.92rem; margin: 6px 0; }
+    .ps-row { margin-bottom: 6px; }
+    .ps-when { font-size: 0.85rem; font-weight: 600; color: #0369a1; margin-bottom: 2px; }
   </style>
 </head>
 <body>
@@ -80,12 +82,19 @@
       <h3>Confirm your lessons</h3>
       <ul class="sel-list" id="modalSlotList"></ul>
       <form id="bookForm">
-        <div class="row">
+        <div class="row" id="primaryStudent">
           <div><label for="fFirst">Student first name</label>
             <input id="fFirst" required minlength="1" placeholder="First name"></div>
           <div><label for="fLast">Student last name</label>
             <input id="fLast" required minlength="1" placeholder="Last name"></div>
         </div>
+        <!-- 2+ lessons: allow a different student per lesson (e.g. two kids
+             at the same 5 PM in different lanes — same parent email). -->
+        <label id="sameStudentWrap" style="display:none; align-items:center; gap:8px; margin:2px 0 6px;">
+          <input type="checkbox" id="sameStudent" checked style="width:auto; min-height:auto;">
+          Same student for all lessons
+        </label>
+        <div id="perStudent"></div>
         <label for="fParent">Parent/guardian name</label>
         <input id="fParent" required minlength="2" placeholder="Parent or guardian full name">
         <label for="fEmail">Email</label>
@@ -169,6 +178,7 @@
     function fmtDay(d) { return d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }); }
     function fmtTime(d) { return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); }
     function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+    function escAttr(s) { return esc(s).replace(/"/g, '&quot;'); }
     function showMsg(id, text, type) {
       const el = document.getElementById(id);
       el.textContent = text; el.className = 'msg show ' + type;
@@ -323,9 +333,42 @@
       const slots = [...selected.values()].sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
       document.getElementById('modalSlotList').innerHTML = slots.map(s => `<li>${slotLine(s)}</li>`).join('');
       document.getElementById('bookMsg').className = 'msg';
+      // "Same student for all" only makes sense with 2+ lessons.
+      document.getElementById('sameStudentWrap').style.display = selected.size >= 2 ? 'flex' : 'none';
+      document.getElementById('sameStudent').checked = true;
+      setPerStudentRows(false);
       refreshVerifyUI();
       document.getElementById('bookModal').classList.add('show');
     }
+
+    // ---- one student per lesson (unchecked "same student for all") ----
+    // The primary first/last row is student #1's; unchecking swaps it for
+    // one prefilled row per lesson. Hidden inputs are disabled so their
+    // `required` doesn't block submission.
+    function sortedSelection() {
+      return [...selected.values()].sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
+    }
+    function setPerStudentRows(perStudent) {
+      const wrap = document.getElementById('perStudent');
+      const primary = document.getElementById('primaryStudent');
+      primary.style.display = perStudent ? 'none' : '';
+      ['fFirst', 'fLast'].forEach(id => document.getElementById(id).disabled = perStudent);
+      if (!perStudent) { wrap.innerHTML = ''; return; }
+      const f = document.getElementById('fFirst').value, l = document.getElementById('fLast').value;
+      wrap.innerHTML = sortedSelection().map(s => {
+        const d = new Date(s.starts_at);
+        return `<div class="ps-row" data-slot-id="${s.id}">
+          <div class="ps-when">${fmtDay(d)} at ${fmtTime(d)} · ${esc(s.pools?.name || '')}</div>
+          <div class="row">
+            <input class="ps-first" required minlength="1" placeholder="First name"
+                   aria-label="Student first name for ${fmtDay(d)} ${fmtTime(d)}" value="${escAttr(f)}">
+            <input class="ps-last" required minlength="1" placeholder="Last name"
+                   aria-label="Student last name for ${fmtDay(d)} ${fmtTime(d)}" value="${escAttr(l)}">
+          </div>
+        </div>`;
+      }).join('');
+    }
+    document.getElementById('sameStudent').onchange = (e) => setPerStudentRows(!e.target.checked);
 
     // ---- Email verification UI ----
     function refreshVerifyUI() {
@@ -377,10 +420,25 @@
       }
       const btn = document.getElementById('submitBtn');
       btn.disabled = true; btn.textContent = 'Booking…';
+      // One entry per lesson, each with ITS student (v8): either the shared
+      // primary student, or the per-lesson rows when the box is unchecked.
+      const perRows = document.querySelectorAll('#perStudent .ps-row');
+      const shared = !perRows.length;
+      const entries = sortedSelection().map(s => {
+        if (shared) return {
+          slot_id: s.id,
+          first_name: document.getElementById('fFirst').value,
+          last_name: document.getElementById('fLast').value
+        };
+        const row = document.querySelector(`#perStudent .ps-row[data-slot-id="${s.id}"]`);
+        return {
+          slot_id: s.id,
+          first_name: row.querySelector('.ps-first').value,
+          last_name: row.querySelector('.ps-last').value
+        };
+      });
       const { data, error } = await db.rpc('book_slots', {
-        p_slot_ids: [...selected.keys()],
-        p_first_name: document.getElementById('fFirst').value,
-        p_last_name: document.getElementById('fLast').value,
+        p_slots: entries,
         p_parent_name: document.getElementById('fParent').value,
         p_email: email,
         p_phone: document.getElementById('fPhone').value,
@@ -417,10 +475,14 @@
       document.getElementById('doneTitle').textContent =
         booked.length === 1 ? "You're booked!" : `All ${booked.length} lessons booked!`;
       document.getElementById('doneList').innerHTML = booked
-        .map(b => { const d = new Date(b.starts_at); return `<li>${fmtDay(d)} at ${fmtTime(d)}</li>`; })
+        .map(b => {
+          const d = new Date(b.starts_at);
+          return `<li>${fmtDay(d)} at ${fmtTime(d)}${b.student ? ' — ' + esc(b.student) : ''}</li>`;
+        })
         .join('');
       document.getElementById('doneModal').classList.add('show');
       document.getElementById('bookForm').reset();
+      setPerStudentRows(false);   // restore the shared-student layout
       selected.clear(); updateTray(); loadSlots();
     };
 

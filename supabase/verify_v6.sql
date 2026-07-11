@@ -58,7 +58,12 @@ begin
   insert into public.slots (id, pool_id, coach_id, starts_at, duration_min, price, status, created_by) values
     ('44444444-4444-4444-4444-444444440091', v_pool, v_coach, now() + interval '3 days', 60, 50, 'cancelled', v_coach),  -- reopen target
     ('44444444-4444-4444-4444-444444440092', v_pool, v_coach, now() - interval '3 days', 60, 50, 'cancelled', v_coach),  -- past, cancelled
-    ('44444444-4444-4444-4444-444444440093', v_pool, v_admin, now() + interval '4 days', 60, 50, 'open',      v_admin); -- admin-owned
+    ('44444444-4444-4444-4444-444444440093', v_pool, v_admin, now() + interval '4 days', 60, 50, 'open',      v_admin),  -- admin-owned
+    -- v8 fixtures: four slots at the SAME concurrent time (two-kids tests)
+    ('44444444-4444-4444-4444-444444440096', v_pool, v_coach, now() + interval '30 hours', 60, 50, 'open', v_coach),
+    ('44444444-4444-4444-4444-444444440097', v_pool, v_admin, now() + interval '30 hours', 60, 50, 'open', v_admin),
+    ('44444444-4444-4444-4444-444444440098', v_pool, v_coach, now() + interval '30 hours', 60, 50, 'open', v_coach),
+    ('44444444-4444-4444-4444-444444440099', v_pool, v_admin, now() + interval '30 hours', 60, 50, 'open', v_admin);
 
   -- OTP for the test client: code 123456
   insert into public.booking_otps (email, code_hash, expires_at)
@@ -67,8 +72,9 @@ begin
   -- ==================== A. book_slots behaviour ====================
   -- A1: no code, no token → must refuse
   begin
-    r := public.book_slots(array['44444444-4444-4444-4444-444444440001']::uuid[],
-         'Kid', 'One', 'Parent One', 'vtest-client@example.com', '2045550000');
+    r := public.book_slots(
+         '[{"slot_id":"44444444-4444-4444-4444-444444440001","first_name":"Kid","last_name":"One"}]'::jsonb,
+         'Parent One', 'vtest-client@example.com', '2045550000');
     rep := rep || E'\nFAIL  A1: booked without any email verification'; nfail := nfail + 1;
   exception when others then
     if sqlerrm like '%verify your email%' then rep := rep || E'\nPASS  A1: verification required'; npass := npass + 1;
@@ -77,8 +83,9 @@ begin
 
   -- A2: five wrong codes → each returns {error}, attempts persist
   for n in 1..5 loop
-    r := public.book_slots(array['44444444-4444-4444-4444-444444440001']::uuid[],
-         'Kid', 'One', 'Parent One', 'vtest-client@example.com', '2045550000', '000000');
+    r := public.book_slots(
+         '[{"slot_id":"44444444-4444-4444-4444-444444440001","first_name":"Kid","last_name":"One"}]'::jsonb,
+         'Parent One', 'vtest-client@example.com', '2045550000', '000000');
     if r->>'error' is null then rep := rep || E'\nFAIL  A2: wrong code #' || n || ' accepted'; nfail := nfail + 1; end if;
   end loop;
   select attempts into n from public.booking_otps where email = 'vtest-client@example.com'
@@ -88,8 +95,9 @@ begin
 
   -- A3: now even the CORRECT code is locked out
   begin
-    r := public.book_slots(array['44444444-4444-4444-4444-444444440001']::uuid[],
-         'Kid', 'One', 'Parent One', 'vtest-client@example.com', '2045550000', '123456');
+    r := public.book_slots(
+         '[{"slot_id":"44444444-4444-4444-4444-444444440001","first_name":"Kid","last_name":"One"}]'::jsonb,
+         'Parent One', 'vtest-client@example.com', '2045550000', '123456');
     rep := rep || E'\nFAIL  A3: locked-out code still worked'; nfail := nfail + 1;
   exception when others then
     if sqlerrm like '%Too many attempts%' then rep := rep || E'\nPASS  A3: wrong OTP 5x locks out'; npass := npass + 1;
@@ -103,10 +111,11 @@ begin
           now() + interval '10 minutes', now() + interval '1 second');
 
   -- A4: book 3 slots atomically with the correct code
-  r := public.book_slots(array['44444444-4444-4444-4444-444444440001',
-                               '44444444-4444-4444-4444-444444440002',
-                               '44444444-4444-4444-4444-444444440003']::uuid[],
-       'Kid', 'One', 'Parent One', 'vtest-client@example.com', '2045550000', '654321');
+  r := public.book_slots(
+       '[{"slot_id":"44444444-4444-4444-4444-444444440001","first_name":"Kid","last_name":"One"},
+         {"slot_id":"44444444-4444-4444-4444-444444440002","first_name":"Kid","last_name":"One"},
+         {"slot_id":"44444444-4444-4444-4444-444444440003","first_name":"Kid","last_name":"One"}]'::jsonb,
+       'Parent One', 'vtest-client@example.com', '2045550000', '654321');
   if json_array_length(r->'bookings') = 3 and r->>'verify_token' is not null then
     rep := rep || E'\nPASS  A4: 3 slots booked in one call, 24h token issued'; npass := npass + 1;
   else
@@ -117,9 +126,10 @@ begin
   -- A5: steal test — one of the next two slots gets booked mid-flow
   update public.slots set status = 'booked' where id = '44444444-4444-4444-4444-444444440005';
   begin
-    r := public.book_slots(array['44444444-4444-4444-4444-444444440004',
-                                 '44444444-4444-4444-4444-444444440005']::uuid[],
-         'Kid', 'One', 'Parent One', 'vtest-client@example.com', '2045550000', null, tok);
+    r := public.book_slots(
+         '[{"slot_id":"44444444-4444-4444-4444-444444440004","first_name":"Kid","last_name":"One"},
+           {"slot_id":"44444444-4444-4444-4444-444444440005","first_name":"Kid","last_name":"One"}]'::jsonb,
+         'Parent One', 'vtest-client@example.com', '2045550000', null, tok);
     rep := rep || E'\nFAIL  A5: booked through a stolen slot'; nfail := nfail + 1;
   exception when others then
     if sqlerrm like '%was just taken%' then rep := rep || E'\nPASS  A5: steal detected and named (' || sqlerrm || ')'; npass := npass + 1;
@@ -131,38 +141,79 @@ begin
   else rep := rep || E'\nFAIL  A5b: ' || n || ' bookings leaked through'; nfail := nfail + 1; end if;
 
   -- A6: token reuse (no code) books without re-verification
-  r := public.book_slots(array['44444444-4444-4444-4444-444444440006']::uuid[],
-       'Kid', 'One', 'Parent One', 'vtest-client@example.com', '2045550000', null, tok);
+  r := public.book_slots(
+       '[{"slot_id":"44444444-4444-4444-4444-444444440006","first_name":"Kid","last_name":"One"}]'::jsonb,
+       'Parent One', 'vtest-client@example.com', '2045550000', null, tok);
   if json_array_length(r->'bookings') = 1 and r->>'verify_token' is null then
     rep := rep || E'\nPASS  A6: 24h token skips the code'; npass := npass + 1;
   else rep := rep || E'\nFAIL  A6: ' || r::text; nfail := nfail + 1; end if;
 
   -- A7: cap of 8 upcoming — 4 booked so far, try 5 more
   begin
-    r := public.book_slots(array['44444444-4444-4444-4444-444444440007',
-                                 '44444444-4444-4444-4444-444444440008',
-                                 '44444444-4444-4444-4444-444444440009',
-                                 '44444444-4444-4444-4444-444444440010',
-                                 '44444444-4444-4444-4444-444444440011']::uuid[],
-         'Kid', 'One', 'Parent One', 'vtest-client@example.com', '2045550000', null, tok);
+    r := public.book_slots(
+         '[{"slot_id":"44444444-4444-4444-4444-444444440007","first_name":"Kid","last_name":"One"},
+           {"slot_id":"44444444-4444-4444-4444-444444440008","first_name":"Kid","last_name":"One"},
+           {"slot_id":"44444444-4444-4444-4444-444444440009","first_name":"Kid","last_name":"One"},
+           {"slot_id":"44444444-4444-4444-4444-444444440010","first_name":"Kid","last_name":"One"},
+           {"slot_id":"44444444-4444-4444-4444-444444440011","first_name":"Kid","last_name":"One"}]'::jsonb,
+         'Parent One', 'vtest-client@example.com', '2045550000', null, tok);
     rep := rep || E'\nFAIL  A7: exceeded the 8-upcoming cap (got 9)'; nfail := nfail + 1;
   exception when others then
     if sqlerrm like '%8 upcoming bookings%' then rep := rep || E'\nPASS  A7: cap of 8 enforced'; npass := npass + 1;
     else rep := rep || E'\nFAIL  A7: unexpected error: ' || sqlerrm; nfail := nfail + 1; end if;
   end;
 
-  -- A8: overlap within the requested set is rejected
+  -- A8 (v8): SAME-student overlap within the set is rejected, naming them
   update public.slots set starts_at = (select starts_at from public.slots where id = '44444444-4444-4444-4444-444444440007')
   where id = '44444444-4444-4444-4444-444444440008';
   begin
-    r := public.book_slots(array['44444444-4444-4444-4444-444444440007',
-                                 '44444444-4444-4444-4444-444444440008']::uuid[],
-         'Kid', 'One', 'Parent One', 'vtest-client@example.com', '2045550000', null, tok);
-    rep := rep || E'\nFAIL  A8: overlapping pair booked'; nfail := nfail + 1;
+    r := public.book_slots(
+         '[{"slot_id":"44444444-4444-4444-4444-444444440007","first_name":"Kid","last_name":"One"},
+           {"slot_id":"44444444-4444-4444-4444-444444440008","first_name":"kid","last_name":"ONE"}]'::jsonb,
+         'Parent One', 'vtest-client@example.com', '2045550000', null, tok);
+    rep := rep || E'\nFAIL  A8: same-student overlapping pair booked'; nfail := nfail + 1;
   exception when others then
-    if sqlerrm like '%overlap%' then rep := rep || E'\nPASS  A8: in-set overlap rejected'; npass := npass + 1;
+    if sqlerrm like '%overlap%' and sqlerrm like '%Kid%' then
+      rep := rep || E'\nPASS  A8: same-student in-set overlap rejected by name (case-insensitive)'; npass := npass + 1;
     else rep := rep || E'\nFAIL  A8: unexpected error: ' || sqlerrm; nfail := nfail + 1; end if;
   end;
+
+  -- ==================== A9–A11: v8 per-student overlap rule ====================
+  -- A9: same email, TWO DIFFERENT kids, exact same 5 PM-style time → books BOTH
+  r := public.book_slots(
+       '[{"slot_id":"44444444-4444-4444-4444-444444440096","first_name":"Emma","last_name":"Test"},
+         {"slot_id":"44444444-4444-4444-4444-444444440097","first_name":"Liam","last_name":"Test"}]'::jsonb,
+       'Parent One', 'vtest-client@example.com', '2045550000', null, tok);
+  if json_array_length(r->'bookings') = 2 then
+    rep := rep || E'\nPASS  A9: two different students book the SAME time on one email'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  A9: ' || r::text; nfail := nfail + 1; end if;
+  if (select booked_by_display from public.slots where id = '44444444-4444-4444-4444-444444440096') = 'Emma T.'
+     and (select booked_by_display from public.slots where id = '44444444-4444-4444-4444-444444440097') = 'Liam T.' then
+    rep := rep || E'\nPASS  A9b: public "First L." display is per-slot student'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  A9b: booked_by_display not per-student'; nfail := nfail + 1; end if;
+
+  -- A10: SAME student vs an EXISTING booking at that time → rejected by name
+  begin
+    r := public.book_slots(
+         '[{"slot_id":"44444444-4444-4444-4444-444444440098","first_name":"Emma","last_name":"Test"}]'::jsonb,
+         'Parent One', 'vtest-client@example.com', '2045550000', null, tok);
+    rep := rep || E'\nFAIL  A10: same student double-booked vs existing'; nfail := nfail + 1;
+  exception when others then
+    if sqlerrm like '%Emma already has a lesson at%' then
+      rep := rep || E'\nPASS  A10: existing-booking conflict names the student (' || sqlerrm || ')'; npass := npass + 1;
+    else rep := rep || E'\nFAIL  A10: unexpected error: ' || sqlerrm; nfail := nfail + 1; end if;
+  end;
+  select count(*) into n from public.bookings where slot_id = '44444444-4444-4444-4444-444444440098';
+  if n = 0 then rep := rep || E'\nPASS  A10b: rejected conflict booked nothing'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  A10b: booking leaked through'; nfail := nfail + 1; end if;
+
+  -- A11: a THIRD different student at that same time still books fine
+  r := public.book_slots(
+       '[{"slot_id":"44444444-4444-4444-4444-444444440098","first_name":"Zoe","last_name":"Test"}]'::jsonb,
+       'Parent One', 'vtest-client@example.com', '2045550000', null, tok);
+  if json_array_length(r->'bookings') = 1 then
+    rep := rep || E'\nPASS  A11: different student unaffected by siblings'' overlaps'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  A11: ' || r::text; nfail := nfail + 1; end if;
 
   -- ==================== B. cancelled_at + display triggers ====================
   -- B1: the trigger stamps the cancellation moment (≈ now)

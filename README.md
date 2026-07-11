@@ -20,7 +20,8 @@ A booking site with no payment infrastructure. Customers with the link book a le
 | `supabase/migration_security.sql` | Security hardening (run after v4) |
 | `supabase/migration_v5.sql` | Slot editing + history/export support |
 | `supabase/migration_v6.sql` | Late-cancel monitor, admin Team management, admin slot reopen, hour×day revenue grid, multi-slot booking with email verification |
-| `supabase/migration_v7.sql` | Revenue grid cells gain a per-coach breakdown (run last) |
+| `supabase/migration_v7.sql` | Revenue grid cells gain a per-coach breakdown |
+| `supabase/migration_v8.sql` | Per-student overlap rule: one email can book different kids into simultaneous lessons (run last) |
 | `supabase/verify_v6.sql` | Post-migration test suite for the SQL Editor — reports PASS/FAIL in a deliberate final "error", rolls everything back |
 | `supabase/verify_v6_api.mjs` | Permission checks against the live REST API with real staff JWTs |
 | `supabase/functions/emails/` | Edge Function that sends confirmation, reminder, and login-code emails via Resend |
@@ -39,7 +40,8 @@ A booking site with no payment infrastructure. Customers with the link book a le
 7. Same again for `supabase/migration_security.sql` → **Run** (security hardening), then `supabase/migration_v5.sql` → **Run** (slot editing).
 8. Same again for `supabase/migration_v6.sql` → **Run**. This adds the late-cancellation monitor, the admin **Team** tab, admin slot reopen, the hour×day revenue grid, and **multi-slot booking with email verification**. ⚠️ v6 **replaces the booking RPC** (`book_slot` → `book_slots` with a verification code): run it and push the updated `book.html` **at the same time**, and redeploy the `emails` Edge Function — an old page against a new database (or vice-versa) can't take bookings.
 9. Same again for `supabase/migration_v7.sql` → **Run**. Each revenue-grid cell now includes a per-coach breakdown (shown as a hover/tap tooltip in the Revenue tab). Frontend-only additions ride along in `staff.html`: per-coach booked/open hours under the calendar legend, and cancellation timestamps on cancelled bookings.
-10. **Verify it worked:** paste `supabase/verify_v6.sql` into the SQL Editor → **Run**. The run **ends in an ERROR on purpose** — the error message *is* the report (the editor hides notices, and erroring out forces Postgres to roll back all the test data). Read the PASS/FAIL lines in it; the first line is the summary. For an end-to-end check with real logins, see `supabase/verify_v6_api.mjs` (header comment explains usage).
+10. Same again for `supabase/migration_v8.sql` → **Run**. Bookings carry a **student per lesson**: one parent email can book two different kids into simultaneous lessons; only the *same* student is blocked from overlapping times (in the checkout and against existing bookings, and when staff move a booked slot). ⚠️ The `book_slots` call shape changed — run this **together with** pushing the updated `book.html` and redeploying the `emails` Edge Function.
+11. **Verify it worked:** paste `supabase/verify_v6.sql` into the SQL Editor → **Run**. The run **ends in an ERROR on purpose** — the error message *is* the report (the editor hides notices, and erroring out forces Postgres to roll back all the test data). Read the PASS/FAIL lines in it; the first line is the summary. For an end-to-end check with real logins, see `supabase/verify_v6_api.mjs` (header comment explains usage).
 6. **Allowlist your staff.** Anyone with a Google account can *sign in*, but only emails in the `staff_emails` table can use the dashboard (enforced in the database, not just the UI). In the SQL Editor:
    ```sql
    insert into public.staff_emails (email) values
@@ -171,7 +173,7 @@ Before sharing the booking link with real families. (Full audit: `PRELAUNCH_AUDI
 1. **Migrations** — in the SQL Editor, run in order: `schema.sql` →
    `migration_google_auth.sql` → `migration_clients_revenue.sql` → `migration_v3.sql`
    → `migration_v4.sql` → `migration_security.sql` → `migration_v5.sql` →
-   `migration_v6.sql` → `migration_v7.sql`. (Idempotent from v5 on — safe to re-run.)
+   `migration_v6.sql` → `migration_v7.sql` → `migration_v8.sql`. (Idempotent from v5 on — safe to re-run.)
 2. **Edge Function secrets** — `supabase secrets set … RESEND_API_KEY / FROM_EMAIL /
    SITE_URL / BUSINESS_TIMEZONE / CRON_SECRET` (§3b).
 3. **Deploy the Edge Function** — `supabase functions deploy emails --no-verify-jwt`
@@ -229,7 +231,7 @@ the previous version's code to redeploy if a send path breaks.
 - **Client records are staff-only.** The `clients` table has no anonymous access at all; rows are created only inside the `book_slots` function. Only admins can edit or delete clients — deleting anonymizes the client's past bookings instead of erasing history.
 - **Booked slots are publicly visible, but only the slot.** The public calendar shows booked times greyed out (time/pool/coach only) so customers see the schedule shape — booking details, names, emails and phones stay staff-only.
 - **Coaches manage only their own lessons.** Row Level Security lets a coach cancel only slots/bookings where they are the assigned coach; admins can cancel anything. Hiding the buttons is cosmetic — the database enforces it.
-- **No double-booking the same time.** `book_slots` rejects a booking if that email already has a confirmed lesson overlapping the requested time — including overlaps *within* the set of lessons being booked together.
+- **No double-booking the same student.** `book_slots` rejects a booking only if the **same student** (per lesson, case-insensitive) already has a confirmed lesson overlapping the requested time — including within the set being booked together. Different kids on one parent email may book simultaneous lessons freely.
 - **Only a first name + last initial is public.** Booked slots show e.g. "Jane D." via a single `slots.booked_by_display` column — never the full last name, parent/guardian name, email, or phone. The parent/guardian name is staff-only and has no public read path.
 - **Self-service bookings are gated by an emailed code.** `My Bookings` sends a 6-digit code (hashed, 10-min expiry, rate-limited, max 5 attempts); only after it matches does `verify_and_list_bookings()` return that email's own lessons. Anonymous users still cannot read the bookings or clients tables directly.
 - **Revenue is admins-only, enforced in the database.** Slot prices have no API read permission for anyone (column-level grants), and revenue comes only from `get_revenue_report()`, which raises an error unless the caller's profile has `role = 'admin'`. Coaches can set a price when publishing slots but can't read prices back in bulk, and the `role` column itself can't be written through the API.

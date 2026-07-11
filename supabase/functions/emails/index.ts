@@ -145,7 +145,7 @@ async function handleConfirmation(body: { booking_id?: string; booking_ids?: str
   if (!ids.length) return json({ error: "booking_id(s) required" }, 400);
 
   const { data, error } = await sb.from("bookings")
-    .select("email, first_name, student_name, cancel_token, slots(starts_at, duration_min, pools(name, address), profiles!coach_id(display_name))")
+    .select("email, first_name, student_name, parent_name, cancel_token, slots(starts_at, duration_min, pools(name, address), profiles!coach_id(display_name))")
     .in("id", ids);
   if (error || !data?.length) return json({ error: error?.message ?? "not found" }, 404);
 
@@ -164,6 +164,7 @@ async function handleConfirmation(body: { booking_id?: string; booking_ids?: str
     const cancelUrl = `${SITE_URL}/book.html?cancel=${b.cancel_token}`;
     return `
     <table style="font-size:0.95rem;margin-bottom:6px;">
+      <tr><td style="padding:2px 10px 2px 0;color:#64748b;">Student</td><td><strong>${esc(b.student_name || b.first_name || "")}</strong></td></tr>
       <tr><td style="padding:2px 10px 2px 0;color:#64748b;">When</td><td><strong>${esc(fmtWhen(slot.starts_at))}</strong> (${slot.duration_min} min)</td></tr>
       <tr><td style="padding:2px 10px 2px 0;color:#64748b;">Pool</td><td>${esc(slot.pools?.name || "")}${slot.pools?.address ? " — " + esc(slot.pools.address) : ""}</td></tr>
       <tr><td style="padding:2px 10px 2px 0;color:#64748b;">Coach</td><td>${esc(slot.profiles?.display_name || "TBD")}</td></tr>
@@ -172,11 +173,13 @@ async function handleConfirmation(body: { booking_id?: string; booking_ids?: str
     ${n > 1 ? '<hr style="border:none;border-top:1px dashed #e2e8f0;margin:10px 0;">' : ""}`;
   };
 
+  // Greet the parent (the email always goes to the booker); fall back to
+  // the student name for pre-v8 single bookings without a parent on file.
   await sendEmail(email,
     n === 1 ? "Your KSJ Swimming lesson is booked ✅"
             : `Your ${n} KSJ Swimming lessons are booked ✅`,
     shell(`
-    <p>Hi ${esc(first.first_name || "there")}, your ${n === 1 ? "lesson is" : `${n} lessons are`} confirmed:</p>
+    <p>Hi ${esc(first.parent_name || first.first_name || "there")}, your ${n === 1 ? "lesson is" : `${n} lessons are`} confirmed:</p>
     ${rows.map(lessonRow).join("")}
     <p style="margin-top:18px;">
       <a href="${myUrl}" style="background:#0369a1;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;">View my bookings</a>
