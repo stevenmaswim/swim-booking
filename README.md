@@ -2,16 +2,49 @@
 
 A booking site with no payment infrastructure. Customers with the link book a lesson with just name + email + phone. Staff log in to publish slots per pool, manage clients, and see bookings; admins additionally see revenue.
 
-**Cost to run: $0** (Supabase free tier + Netlify free tier).
+**Cost to run: $0** (Supabase free tier + GitHub Pages).
+
+## How the site is put together (since the Astro restyle)
+
+The **public face** (home, contact, 404) is an [Astro](https://astro.build) +
+TailwindCSS site based on the [Astroship](https://github.com/surjithctly/astroship)
+template (GPL-3.0 — see `LICENSE`), living in `src/`. The **booking system**
+(`book.html`, `mybookings.html`, `staff.html`, `config.js`, `styles.css`) lives in
+`public/` as plain HTML/JS, **unchanged** — Astro copies `public/` into the build
+verbatim, so those pages deploy exactly as before at `/book.html`, `/mybookings.html`
+and `/staff.html`, and you keep editing them as plain HTML with no build knowledge.
+
+**Local development:**
+```bash
+pnpm install     # once
+pnpm dev         # Astro dev server (booking pages served from public/ too)
+pnpm build       # production build into dist/
+pnpm preview     # serve the built dist/ locally
+```
+
+**Deployment** is a GitHub Actions pipeline (`.github/workflows/deploy.yml`): every
+push to `main` builds the Astro site and publishes `dist/` to GitHub Pages using
+`withastro/action`. **One-time settings change:** repo **Settings → Pages → Source →
+"GitHub Actions"** (replacing the old "Deploy from a branch"). The custom domain keeps
+working because `public/CNAME` ships into every build. The site serves at the domain
+root (`https://ksjswimming.com/`), so Astro needs no `base` path; if you ever drop the
+custom domain and serve from `https://USER.github.io/REPO/`, set `base: "/REPO"` in
+`astro.config.mjs` and re-check absolute links in the booking pages.
+
+**Real photos:** the homepage hero uses a placeholder (`public/hero-swim.svg`) — drop a
+real lesson photo into `public/` (e.g. `hero.jpg`) and point `src/components/hero.astro`
+at it (there's a `TODO` at the spot). Coach and pool photos come from Supabase Storage
+via the staff dashboard, same as before. Placeholder parent quotes live in
+`src/components/testimonials.astro`, also `TODO`-marked.
 
 ## What's included
 
 | File | Purpose |
 |---|---|
-| `index.html` | Public home page (About the Coaches + pools load automatically) |
-| `book.html` | Customer booking page — share this link in your WeChat group |
-| `mybookings.html` | Customer self-service: view/cancel your bookings via an emailed code |
-| `staff.html` | Staff dashboard (Google or email login, staff-only) |
+| `src/` | Astro public site (Astroship-based): homepage with coaches/locations from Supabase, contact, 404 |
+| `public/book.html` | Customer booking page — share this link in your WeChat group |
+| `public/mybookings.html` | Customer self-service: view/cancel your bookings via an emailed code |
+| `public/staff.html` | Staff dashboard (Google login, staff-only) |
 | `supabase/schema.sql` | Database, security rules, and booking logic |
 | `supabase/migration_google_auth.sql` | Google sign-in + staff allowlist (run after `schema.sql`) |
 | `supabase/migration_clients_revenue.sql` | Client CRM + admin-only revenue tracking |
@@ -25,8 +58,10 @@ A booking site with no payment infrastructure. Customers with the link book a le
 | `supabase/verify_v6.sql` | Post-migration test suite for the SQL Editor — reports PASS/FAIL in a deliberate final "error", rolls everything back |
 | `supabase/verify_v6_api.mjs` | Permission checks against the live REST API with real staff JWTs |
 | `supabase/functions/emails/` | Edge Function that sends confirmation, reminder, and login-code emails via Resend |
-| `config.js` | Your Supabase keys go here |
-| `styles.css` | Shared styling |
+| `public/config.js` | Your Supabase keys go here (shared by booking pages and the homepage sections) |
+| `public/styles.css` | Booking pages' styling (the Astro pages use Tailwind, tuned to the same palette) |
+| `.github/workflows/deploy.yml` | Builds the Astro site and publishes to GitHub Pages on every push |
+| `LICENSE` | GPL-3.0 (required by the Astroship template) |
 
 ## Setup (~15 minutes)
 
@@ -153,11 +188,12 @@ All emails are signed **KSJ Swimming** with reply-to **ksjswimming@gmail.com**.
 
 ### 4. Deploy
 
-**GitHub Pages** (this repo): push to `main`, then repo **Settings → Pages → Deploy from a branch → main / (root)**. The site appears at `https://stevenmaswim.github.io/swim-booking/`.
+**GitHub Pages via Actions** (this repo): push to `main` — the workflow in
+`.github/workflows/deploy.yml` builds the Astro site and publishes `dist/`. One-time:
+repo **Settings → Pages → Source → "GitHub Actions"**. The site serves at
+`https://ksjswimming.com/` (custom domain via `public/CNAME`).
 
-**Or Netlify:** go to [app.netlify.com/drop](https://app.netlify.com/drop) and drag the whole `swim-booking` folder in — you get `https://your-site.netlify.app`.
-
-Either way, share `<your-site>/book.html` in your WeChat group, and make sure `<your-site>/staff.html` is in the Supabase redirect-URL list (step 2c).
+Share `<your-site>/book.html` in your WeChat group, and make sure `<your-site>/staff.html` is in the Supabase redirect-URL list (step 2c).
 
 ### 5. First run
 1. Open `/staff.html`, sign in with Google (or email), add your **pools** first.

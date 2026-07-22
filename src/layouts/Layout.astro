@@ -1,0 +1,50 @@
+---
+import { SEO } from "astro-seo";
+import Footer from "@/components/footer.astro";
+import Navbar from "@/components/navbar/navbar.astro";
+import "@fontsource-variable/inter/index.css";
+import "@fontsource-variable/bricolage-grotesque";
+import "../styles/global.css";
+
+export interface Props {
+  title: string;
+}
+
+const canonicalURL = new URL(Astro.url.pathname, Astro.site).toString();
+
+const { title } = Astro.props;
+
+const makeTitle = title
+  ? title + " | " + "KSJ Swimming"
+  : "KSJ Swimming — Private Swim Lessons";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="generator" content={Astro.generator} />
+
+    <!-- <link rel="preload" as="image" href={src} alt="Hero" /> -->
+    <meta name="referrer" content="no-referrer" />
+    <SEO
+      title={makeTitle}
+      description="Private swim lessons with experienced coaches at pools across the city. Book your weekly spot in under a minute — no account needed."
+      canonical={canonicalURL}
+    />
+  </head>
+  <body>
+    <Navbar />
+    <slot />
+    <Footer />
+    <style is:global>
+      /* Improve Page speed */
+      /* https://css-tricks.com/almanac/properties/c/content-visibility/ */
+      img {
+        content-visibility: auto;
+      }
+    </style>
+  </body>
+</html>

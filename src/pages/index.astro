@@ -1,0 +1,80 @@
+---
+import Container from "@/components/container.astro";
+import Cta from "@/components/cta.astro";
+import Features from "@/components/features.astro";
+import Hero from "@/components/hero.astro";
+import Coaches from "@/components/coaches.astro";
+import Locations from "@/components/locations.astro";
+import Testimonials from "@/components/testimonials.astro";
+import Layout from "@/layouts/Layout.astro";
+---
+
+<Layout title="">
+  <Container>
+    <Hero />
+    <Features />
+    <Coaches />
+    <Locations />
+    <Testimonials />
+    <Cta />
+  </Container>
+
+  <!-- Coaches + Locations come from Supabase, exactly like the old landing
+       page: public coach profiles and active pools only (RLS enforces this
+       server-side; the anon key in config.js is public by design). -->
+  <script is:inline src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script is:inline src="/config.js"></script>
+  <script is:inline>
+    (async function () {
+      const cg = document.getElementById("coachGrid");
+      const pg = document.getElementById("poolGrid");
+      const esc = (s) => {
+        const d = document.createElement("div");
+        d.textContent = s || "";
+        return d.innerHTML;
+      };
+      const escAttr = (s) => esc(s).replace(/"/g, "&quot;");
+      const empty = (msg) =>
+        '<p class="col-span-full text-center text-slate-500">' + msg + "</p>";
+      if (typeof db === "undefined" || !db) {
+        cg.innerHTML = pg.innerHTML = empty(
+          "Unavailable — the site is not connected to Supabase yet."
+        );
+        return;
+      }
+      try {
+        const [coaches, pools] = await Promise.all([
+          db.from("profiles").select("display_name, bio, photo_url").eq("is_public", true),
+          db.from("pools").select("name, address, notes, photo_url").eq("active", true),
+        ]);
+        if (coaches.error || pools.error)
+          throw coaches.error || pools.error;
+
+        cg.innerHTML = coaches.data && coaches.data.length
+          ? coaches.data.map((c) => `
+              <div class="text-center">
+                ${c.photo_url
+                  ? `<img class="w-24 h-24 rounded-full object-cover mx-auto shadow" src="${escAttr(c.photo_url)}" alt="${escAttr(c.display_name)}" loading="lazy">`
+                  : `<div class="w-24 h-24 rounded-full mx-auto bg-brand-100 text-brand-700 flex items-center justify-center text-3xl font-bold">${esc(c.display_name.charAt(0).toUpperCase())}</div>`}
+                <h3 class="mt-4 text-lg font-semibold">${esc(c.display_name)}</h3>
+                <p class="text-slate-500 mt-1">${esc(c.bio) || "Swim coach"}</p>
+              </div>`).join("")
+          : empty("Coach bios coming soon.");
+
+        pg.innerHTML = pools.data && pools.data.length
+          ? pools.data.map((p) => `
+              <div class="text-center">
+                ${p.photo_url
+                  ? `<img class="w-full h-36 rounded-2xl object-cover shadow" src="${escAttr(p.photo_url)}" alt="${escAttr(p.name)}" loading="lazy">`
+                  : `<div class="w-full h-36 rounded-2xl bg-brand-100 text-brand-700 flex items-center justify-center text-4xl">📍</div>`}
+                <h3 class="mt-4 text-lg font-semibold">${esc(p.name)}</h3>
+                <p class="text-slate-500 mt-1">${esc(p.address)}</p>
+                ${p.notes ? `<p class="text-slate-400 text-sm mt-1">${esc(p.notes)}</p>` : ""}
+              </div>`).join("")
+          : empty("Locations coming soon.");
+      } catch (e) {
+        cg.innerHTML = pg.innerHTML = empty("Could not load site data — please refresh.");
+      }
+    })();
+  </script>
+</Layout>

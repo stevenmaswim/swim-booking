@@ -1,0 +1,22 @@
+---
+import Sectionhead from "@/components/sectionhead.astro";
+---
+
+<div id="locations" class="mt-24 scroll-mt-24">
+  <Sectionhead>
+    <Fragment slot="title">Where We Teach</Fragment>
+    <Fragment slot="desc">
+      Pick the pool that's closest to home when you book.
+    </Fragment>
+  </Sectionhead>
+
+  <!-- Populated client-side from Supabase (active pools — same query the
+       old landing page used). See the loader script in src/pages/index.astro. -->
+  <div
+    id="poolGrid"
+    class="grid sm:grid-cols-2 md:grid-cols-3 gap-10 mx-auto max-w-4xl mt-12">
+    <p class="ksj-empty col-span-full text-center text-slate-500">
+      Loading locations…
+    </p>
+  </div>
+</div>

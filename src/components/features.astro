@@ -1,0 +1,68 @@
+---
+// @ts-ignore
+import { Icon } from "astro-icon/components";
+
+const features = [
+  {
+    title: "One-on-One Lessons",
+    description:
+      "Private 30–90 minute lessons matched to your swimmer's level — from first bubbles to stroke refinement.",
+    icon: "bx:bxs-user",
+  },
+  {
+    title: "Experienced Coaches",
+    description:
+      "Certified, experienced coaches who teach water safety first and make every lesson fun.",
+    icon: "bx:bxs-badge-check",
+  },
+  {
+    title: "Pools Across the City",
+    description:
+      "Multiple pool locations so you can pick the one closest to home — see Locations below.",
+    icon: "bx:bxs-map",
+  },
+  {
+    title: "Book Online in a Minute",
+    description:
+      "See real availability, pick your times, and book — no account or app required.",
+    icon: "bx:bxs-calendar-check",
+  },
+  {
+    title: "Confirmations & Reminders",
+    description:
+      "Every booking is confirmed by email with a reminder before the lesson, plus a cancel link if plans change.",
+    icon: "bx:bxs-envelope",
+  },
+  {
+    title: "Family-Friendly Booking",
+    description:
+      "Book several lessons at once — even two kids at the same time — all under one parent email.",
+    icon: "bx:bxs-group",
+  },
+];
+---
+
+<div class="mt-16 md:mt-0">
+  <h2 class="text-4xl lg:text-5xl font-bold lg:tracking-tight">
+    Why families choose KSJ
+  </h2>
+  <p class="text-lg mt-4 text-slate-600">
+    Small, personal, and built around your week.
+  </p>
+</div>
+
+<div class="grid sm:grid-cols-2 md:grid-cols-3 mt-16 gap-16">
+  {
+    features.map((item) => (
+      <div class="flex gap-4 items-start">
+        <div class="mt-1 bg-brand-600 rounded-full p-2 w-8 h-8 shrink-0">
+          <Icon class="text-white" name={item.icon} />
+        </div>
+        <div>
+          <h3 class="font-semibold text-lg">{item.title}</h3>{" "}
+          <p class="text-slate-500 mt-2 leading-relaxed">{item.description}</p>
+        </div>
+      </div>
+    ))
+  }
+</div>

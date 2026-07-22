@@ -1,0 +1,36 @@
+---
+import Container from "@/components/container.astro";
+import Sectionhead from "@/components/sectionhead.astro";
+import Layout from "@/layouts/Layout.astro";
+import Link from "@/components/ui/link.astro";
+import { Icon } from "astro-icon/components";
+---
+
+<Layout title="Contact">
+  <Container>
+    <Sectionhead>
+      <Fragment slot="title">Contact</Fragment>
+      <Fragment slot="desc">Questions about lessons, levels, or times? We're happy to help.</Fragment>
+    </Sectionhead>
+
+    <div class="mx-auto max-w-xl mt-16 text-center">
+      <p class="text-lg leading-relaxed text-slate-500">
+        Email is the fastest way to reach us — we usually reply within a day.
+        For booking changes, the cancel link in your confirmation email or
+        <a href="/mybookings.html" class="text-brand-700 underline">My Bookings</a>
+        is even faster.
+      </p>
+      <div class="flex items-center justify-center mt-8 gap-2 text-gray-600">
+        <Icon class="text-brand-600 w-5 h-5" name="uil:envelope" />
+        <a href="mailto:ksjswimming@gmail.com" class="text-lg hover:text-brand-700"
+          >ksjswimming@gmail.com</a>
+      </div>
+      <div class="flex justify-center mt-8">
+        <Link href="mailto:ksjswimming@gmail.com">Email Us</Link>
+      </div>
+      <p class="text-sm text-slate-400 mt-10">
+        You can also reach us through the KSJ WeChat group.
+      </p>
+    </div>
+  </Container>
+</Layout>

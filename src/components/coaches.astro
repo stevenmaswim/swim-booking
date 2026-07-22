@@ -1,0 +1,23 @@
+---
+import Sectionhead from "@/components/sectionhead.astro";
+---
+
+<div id="coaches" class="mt-24 scroll-mt-24">
+  <Sectionhead>
+    <Fragment slot="title">Meet the Coaches</Fragment>
+    <Fragment slot="desc">
+      The people who'll be in the water with you every week.
+    </Fragment>
+  </Sectionhead>
+
+  <!-- Populated client-side from Supabase (public coach profiles only —
+       same query the old landing page used). See the loader script in
+       src/pages/index.astro. -->
+  <div
+    id="coachGrid"
+    class="grid sm:grid-cols-2 md:grid-cols-3 gap-10 mx-auto max-w-4xl mt-12">
+    <p class="ksj-empty col-span-full text-center text-slate-500">
+      Loading coaches…
+    </p>
+  </div>
+</div>
