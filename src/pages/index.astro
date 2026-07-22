@@ -5,7 +5,6 @@ import Features from "@/components/features.astro";
 import Hero from "@/components/hero.astro";
 import Coaches from "@/components/coaches.astro";
 import Locations from "@/components/locations.astro";
-import Testimonials from "@/components/testimonials.astro";
 import Layout from "@/layouts/Layout.astro";
 ---
 
@@ -15,7 +14,6 @@ import Layout from "@/layouts/Layout.astro";
     <Features />
     <Coaches />
     <Locations />
-    <Testimonials />
     <Cta />
   </Container>
 
@@ -66,7 +64,7 @@ import Layout from "@/layouts/Layout.astro";
               <div class="text-center">
                 ${p.photo_url
                   ? `<img class="w-full h-36 rounded-2xl object-cover shadow" src="${escAttr(p.photo_url)}" alt="${escAttr(p.name)}" loading="lazy">`
-                  : `<div class="w-full h-36 rounded-2xl bg-brand-100 text-brand-700 flex items-center justify-center text-4xl">📍</div>`}
+                  : `<img class="w-full h-36 rounded-2xl object-cover shadow" src="/images/pool-generic.jpg" alt="" loading="lazy">`}
                 <h3 class="mt-4 text-lg font-semibold">${esc(p.name)}</h3>
                 <p class="text-slate-500 mt-1">${esc(p.address)}</p>
                 ${p.notes ? `<p class="text-slate-400 text-sm mt-1">${esc(p.notes)}</p>` : ""}

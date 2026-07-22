@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="referrer" content="no-referrer">
   <title>Book a Lesson — KSJ Swimming</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="stylesheet" href="styles.css">
   <style>
     /* Multi-select booking */
@@ -25,22 +28,23 @@
     .verify-row > div { flex: 1; min-width: 140px; }
     .verified-note { color: #15803d; font-weight: 600; font-size: 0.92rem; margin: 6px 0; }
     .ps-row { margin-bottom: 6px; }
-    .ps-when { font-size: 0.85rem; font-weight: 600; color: #0369a1; margin-bottom: 2px; }
+    .ps-when { font-size: 0.875rem; font-weight: 600; color: #0369a1; margin-bottom: 2px; }
   </style>
 </head>
 <body>
   <nav>
     <div class="container">
-      <a class="brand" href="index.html">&#127946; KSJ Swimming</a>
+      <a class="brand" href="index.html"><img class="logo-mark" src="/favicon.svg" alt="" width="30" height="30"> KSJ Swimming</a>
       <div class="nav-links">
         <a href="index.html">Home</a>
         <a href="mybookings.html">My Bookings</a>
         <a href="mailto:ksjswimming@gmail.com">Contact Us</a>
+        <a href="staff.html" id="staffNavLink"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span>Staff</span></a>
       </div>
     </div>
   </nav>
 
-  <div class="container" style="padding-top: 28px; padding-bottom: 48px; max-width: 1080px;">
+  <main class="container" style="padding-top: 28px; padding-bottom: 48px; max-width: 1080px;">
     <h1 style="margin-bottom: 4px;">Book a Lesson</h1>
     <p class="muted" style="margin-bottom: 20px;">Pick a time below — you'll just need first &amp; last name, a parent/guardian name, email, and phone number.</p>
 
@@ -67,7 +71,7 @@
       <div class="msg" id="listMsg"></div>
       <div id="slotList"><p class="empty">Loading available times…</p></div>
     </div>
-  </div>
+  </main>
 
   <!-- Selection tray -->
   <div class="tray" id="selTray">
@@ -78,7 +82,7 @@
 
   <!-- Booking modal -->
   <div class="modal-backdrop" id="bookModal">
-    <div class="modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Confirm your lessons">
       <h3>Confirm your lessons</h3>
       <ul class="sel-list" id="modalSlotList"></ul>
       <form id="bookForm">
@@ -114,7 +118,7 @@
               <button type="button" class="btn secondary" id="sendCodeBtn">Email me a code</button>
             </div>
           </div>
-          <p class="muted" style="font-size:0.85rem; margin:4px 0 0;">We verify your email so your confirmation and cancellation links reach you.</p>
+          <p class="muted" style="font-size:0.875rem; margin:4px 0 0;">We verify your email so your confirmation and cancellation links reach you.</p>
         </div>
 
         <div class="msg" id="bookMsg"></div>
@@ -128,7 +132,7 @@
 
   <!-- Success modal -->
   <div class="modal-backdrop" id="doneModal">
-    <div class="modal" style="text-align:center;">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Booking confirmed" style="text-align:center;">
       <div style="font-size: 2.4rem;">&#127881;</div>
       <h3 id="doneTitle">You're booked!</h3>
       <ul class="sel-list" id="doneList" style="text-align:left;"></ul>
@@ -138,7 +142,8 @@
   </div>
 
   <footer>
-    <div class="container">KSJ Swimming — <a href="mybookings.html">My Bookings</a> · <a href="mailto:ksjswimming@gmail.com">Contact Us</a></div>
+    <div class="container">KSJ Swimming — <a href="mybookings.html">My Bookings</a> · <a href="mailto:ksjswimming@gmail.com">Contact Us</a>
+        <a href="staff.html">Staff</a></div>
   </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -520,6 +525,33 @@
       document.getElementById('slotList').innerHTML =
         '<p class="empty">Booking is unavailable until the site is configured.</p>';
       showMsg('listMsg', 'This site is not connected to Supabase yet — see the banner above.', 'error');
+    }
+  </script>
+
+  <script>
+    // ---- accessibility niceties (visual pass; no booking logic) ----
+    // Escape closes the topmost open modal; Tab is trapped inside it.
+    document.addEventListener('keydown', (e) => {
+      const open = document.querySelector('.modal-backdrop.show');
+      if (!open) return;
+      if (e.key === 'Escape') { open.classList.remove('show'); return; }
+      if (e.key !== 'Tab') return;
+      const f = [...open.querySelectorAll('button, [href], input, select, textarea')]
+        .filter((el) => !el.disabled && el.offsetParent !== null);
+      if (!f.length) return;
+      const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { last.focus(); e.preventDefault(); }
+      else if (!e.shiftKey && document.activeElement === last) { first.focus(); e.preventDefault(); }
+    });
+  </script>
+
+  <script>
+    // Signed-in staff see "Dashboard" instead of "Staff" in the nav.
+    if (typeof db !== 'undefined' && db) {
+      db.auth.getSession().then(({ data }) => {
+        const el = document.getElementById('staffNavLink');
+        if (data && data.session && el) el.querySelector('span').textContent = 'Dashboard';
+      }).catch(() => {});
     }
   </script>
 </body>

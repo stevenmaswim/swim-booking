@@ -3,18 +3,20 @@ import Link from "@/components/ui/link.astro";
 import { Icon } from "astro-icon/components";
 ---
 
-<main
+<div
   class="grid lg:grid-cols-2 place-items-center pt-16 pb-8 md:pt-12 md:pb-24">
   <div class="py-6 md:order-1 hidden md:block">
-    <!-- TODO: swap the placeholder for a real photo of a KSJ lesson —
-         drop it in public/ (e.g. hero.jpg) and change the src below. -->
+    <!-- Stock stand-in (Unsplash license, downloaded into the repo):
+         https://unsplash.com/photos/1530549387789-4c1017266635
+         TODO: replace with a real photo of a KSJ lesson — drop it in
+         public/images/ and change the src below. -->
     <img
-      src="/hero-swim.svg"
-      alt="Swim lesson in a pool"
-      width="620"
-      height="480"
+      src="/images/hero-pool.jpg"
+      alt="Swimmer doing butterfly stroke in a lap pool"
+      width="1200"
+      height="800"
       loading="eager"
-      class="rounded-3xl shadow-lg"
+      class="rounded-3xl shadow-lg object-cover aspect-[3/2]"
     />
   </div>
   <div>
@@ -44,4 +46,4 @@ import { Icon } from "astro-icon/components";
       </Link>
     </div>
   </div>
-</main>
+</div>

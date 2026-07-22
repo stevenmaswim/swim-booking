@@ -87,7 +87,7 @@ function fmtWhen(iso: string): string {
 function shell(inner: string): string {
   return `<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
     max-width:520px;margin:0 auto;color:#0f172a;line-height:1.55;">
-    <h2 style="color:#075985;margin:0 0 4px;">🏊 KSJ Swimming</h2>
+    <h2 style="color:#075985;margin:0 0 4px;">KSJ Swimming</h2>
     ${inner}
     <hr style="border:none;border-top:1px solid #e2e8f0;margin:22px 0;">
     <p style="color:#64748b;font-size:0.85rem;">KSJ Swimming · reply to this email or

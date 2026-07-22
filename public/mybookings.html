@@ -5,21 +5,25 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="referrer" content="no-referrer">
   <title>My Bookings — KSJ Swimming</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <nav>
     <div class="container">
-      <a class="brand" href="index.html">&#127946; KSJ Swimming</a>
+      <a class="brand" href="index.html"><img class="logo-mark" src="/favicon.svg" alt="" width="30" height="30"> KSJ Swimming</a>
       <div class="nav-links">
         <a href="index.html">Home</a>
         <a href="book.html">Book a Lesson</a>
+        <a href="staff.html" id="staffNavLink"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span>Staff</span></a>
         <a href="mailto:ksjswimming@gmail.com">Contact Us</a>
       </div>
     </div>
   </nav>
 
-  <div class="container" style="padding-top: 28px; padding-bottom: 48px; max-width: 760px;">
+  <main class="container" style="padding-top: 28px; padding-bottom: 48px; max-width: 760px;">
     <h1 style="margin-bottom: 4px;">My Bookings</h1>
     <p class="muted" style="margin-bottom: 20px;">Enter the email you booked with and we'll send you a 6-digit code to view your lessons.</p>
 
@@ -49,10 +53,11 @@
       <h2 style="margin:24px 0 12px;">Past &amp; cancelled</h2>
       <div id="pastList"></div>
     </div>
-  </div>
+  </main>
 
   <footer>
-    <div class="container">KSJ Swimming — <a href="book.html">Book a Lesson</a> · <a href="mailto:ksjswimming@gmail.com">Contact Us</a></div>
+    <div class="container">KSJ Swimming — <a href="book.html">Book a Lesson</a>
+        <a href="staff.html">Staff</a> · <a href="mailto:ksjswimming@gmail.com">Contact Us</a></div>
   </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -165,6 +170,16 @@
     if (!db) {
       document.getElementById('sendCodeBtn').disabled = true;
       showMsg('emailMsg', 'This site is not connected to Supabase yet — see the banner above.', 'error');
+    }
+  </script>
+
+  <script>
+    // Signed-in staff see "Dashboard" instead of "Staff" in the nav.
+    if (typeof db !== 'undefined' && db) {
+      db.auth.getSession().then(({ data }) => {
+        const el = document.getElementById('staffNavLink');
+        if (data && data.session && el) el.querySelector('span').textContent = 'Dashboard';
+      }).catch(() => {});
     }
   </script>
 </body>

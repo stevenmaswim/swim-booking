@@ -3,6 +3,8 @@ import Container from "@/components/container.astro";
 import Link from "@/components/ui/link.astro";
 import { Astronav, MenuItems, MenuIcon } from "astro-navbar";
 
+import { Icon } from "astro-icon/components";
+
 const menuitems = [
   { title: "Home", path: "/" },
   { title: "Coaches", path: "/#coaches" },
@@ -16,7 +18,10 @@ const menuitems = [
   <header class="flex flex-col lg:flex-row justify-between items-center my-5">
     <Astronav>
       <div class="flex w-full lg:w-auto items-center justify-between">
-        <a href="/" class="text-lg font-bold text-brand-700">🏊 KSJ Swimming</a>
+        <a href="/" class="text-lg font-bold text-brand-700 flex items-center gap-2">
+          <img src="/favicon.svg" alt="" width="30" height="30" class="rounded-lg" />
+          KSJ Swimming
+        </a>
         <div class="block lg:hidden">
           <MenuIcon class="w-4 h-4 text-gray-800" />
         </div>
@@ -35,13 +40,25 @@ const menuitems = [
             ))
           }
         </ul>
-        <div class="lg:hidden flex items-center mt-3 gap-4">
+        <div class="lg:hidden flex flex-col items-stretch mt-3 gap-3">
+          <a
+            href="/staff.html"
+            class="flex items-center justify-center gap-1.5 py-2 text-gray-600 hover:text-brand-700">
+            <Icon class="w-4 h-4" name="bx:bxs-user-circle" />
+            Staff Login
+          </a>
           <Link href="/book.html" size="md" block>Book a Lesson</Link>
         </div>
       </MenuItems>
     </Astronav>
     <div>
       <div class="hidden lg:flex items-center gap-4">
+        <a
+          href="/staff.html"
+          class="flex items-center gap-1.5 text-sm text-gray-600 hover:text-brand-700 min-h-11">
+          <Icon class="w-4 h-4" name="bx:bxs-user-circle" />
+          Staff
+        </a>
         <Link href="/book.html" size="md">Book a Lesson</Link>
       </div>
     </div>

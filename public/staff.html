@@ -5,17 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="referrer" content="no-referrer">
   <title>Staff — KSJ Swimming</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="stylesheet" href="styles.css">
   <style>
     /* Late-cancellation monitor (informational badges) */
     .badge.late  { background: #fef3c7; color: #92400e; }
     .badge.late3 { background: #fee2e2; color: #991b1b; }
-    .cxl-when { font-size: 0.78rem; margin-top: 2px; white-space: nowrap; }
+    .cxl-when { font-size: 0.875rem; margin-top: 2px; white-space: nowrap; }
     /* Calendar blocks stay readable when lanes get narrow: the time is
        always visible; pool text truncates. Full details in title + modal. */
     .cal-block .cb-line { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     /* Revenue hour × day grid */
-    .revgrid { border-collapse: collapse; font-size: 0.85rem; }
+    .revgrid { border-collapse: collapse; font-size: 0.875rem; }
     .revgrid th, .revgrid td { border: 1px solid #e2e8f0; padding: 4px 8px; text-align: right; white-space: nowrap; }
     .revgrid th { background: #f1f5f9; }
     .revgrid td.has { background: #e0f2fe; cursor: default; }
@@ -24,13 +27,13 @@
     .rgtip {
       position: fixed; z-index: 120; display: none;
       background: #0f172a; color: #f1f5f9; border-radius: 8px;
-      padding: 8px 12px; font-size: 0.82rem; line-height: 1.5;
+      padding: 8px 12px; font-size: 0.875rem; line-height: 1.5;
       box-shadow: 0 6px 18px rgba(2, 6, 23, 0.35);
       pointer-events: none; max-width: 280px; white-space: nowrap;
     }
     .rgtip .rgtip-total { border-top: 1px solid #334155; margin-top: 5px; padding-top: 4px; font-weight: 700; }
     /* Calendar: per-coach hours for the displayed week */
-    #coachHours { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-bottom: 10px; font-size: 0.85rem; }
+    #coachHours { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-bottom: 10px; font-size: 0.875rem; }
     #coachHours .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; vertical-align: baseline; }
     /* Team tab */
     .team-card { display: flex; gap: 14px; align-items: flex-start; }
@@ -40,7 +43,7 @@
 <body>
   <nav>
     <div class="container">
-      <a class="brand" href="index.html">&#127946; KSJ Swimming <span class="muted" style="font-weight:500;">Staff</span></a>
+      <a class="brand" href="index.html"><img class="logo-mark" src="/favicon.svg" alt="" width="30" height="30"> KSJ Swimming <span class="muted" style="font-weight:500;">Staff</span></a>
       <div class="nav-links">
         <span id="whoami" class="muted"></span>
         <button class="btn small danger" id="logoutBtn" style="display:none;">Log out</button>
@@ -48,10 +51,11 @@
     </div>
   </nav>
 
+  <main>
   <!-- ============ LOGIN ============ -->
   <div class="container" id="loginView" style="max-width: 420px; padding-top: 60px; display:none;">
     <div class="card">
-      <h2 style="margin-bottom:4px;">Staff login</h2>
+      <h1 style="margin-bottom:4px; font-size:1.5rem;">Staff login</h1>
       <p class="muted">Sign in with Google. Only authorized staff can access the dashboard.</p>
       <button type="button" class="btn google" id="googleBtn" style="width:100%; margin-top:16px;">
         <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
@@ -63,17 +67,18 @@
 
   <!-- ============ DASHBOARD ============ -->
   <div class="container" id="dashView" style="padding-top: 24px; padding-bottom: 60px; display:none;">
+    <h1 style="font-size:1.35rem; letter-spacing:-0.01em; margin-bottom:12px;">Staff Dashboard</h1>
     <div class="msg" id="dashMsg"></div>
     <div class="tabs">
-      <button data-tab="calendar" class="active">&#128197; Calendar</button>
-      <button data-tab="slots">&#10133; Publish Slots</button>
-      <button data-tab="bookings">&#128203; Bookings</button>
-      <button data-tab="history">&#128198; History</button>
-      <button data-tab="clients">&#128101; Clients</button>
-      <button data-tab="pools">&#128205; Pools</button>
-      <button data-tab="me">&#128100; My Profile</button>
-      <button data-tab="team" id="teamTabBtn" style="display:none;">&#129333; Team</button>
-      <button data-tab="revenue" id="revTabBtn" style="display:none;">&#128176; Revenue</button>
+      <button data-tab="calendar" class="active">Calendar</button>
+      <button data-tab="slots">Publish Slots</button>
+      <button data-tab="bookings">Bookings</button>
+      <button data-tab="history">History</button>
+      <button data-tab="clients">Clients</button>
+      <button data-tab="pools">Pools</button>
+      <button data-tab="me">My Profile</button>
+      <button data-tab="team" id="teamTabBtn" style="display:none;">Team</button>
+      <button data-tab="revenue" id="revTabBtn" style="display:none;">Revenue</button>
     </div>
 
     <!-- Calendar tab -->
@@ -100,17 +105,17 @@
         <p class="muted">Creates back-to-back slots customers can book. Example: 4 slots &times; 30 min from 4:00 PM = 4:00, 4:30, 5:00, 5:30.</p>
         <form id="slotForm">
           <div class="row">
-            <div><label>Date</label><input type="date" id="slDate" required></div>
-            <div><label>First slot starts</label><input type="time" id="slStart" required value="16:00"></div>
-            <div><label>Slot length (min)</label><select id="slDur">
+            <div><label for="slDate">Date</label><input type="date" id="slDate" required></div>
+            <div><label for="slStart">First slot starts</label><input type="time" id="slStart" required value="16:00"></div>
+            <div><label for="slDur">Slot length (min)</label><select id="slDur">
               <option>30</option><option>45</option><option selected>60</option><option>90</option>
             </select></div>
-            <div><label># of slots</label><input type="number" id="slCount" min="1" max="20" value="1" required></div>
+            <div><label for="slCount"># of slots</label><input type="number" id="slCount" min="1" max="20" value="1" required></div>
           </div>
           <div class="row">
-            <div><label>Pool</label><select id="slPool" required></select></div>
-            <div><label>Coach</label><select id="slCoach"><option value="">Unassigned</option></select></div>
-            <div><label>Price ($ per slot)</label><input type="number" id="slPrice" min="0" step="0.01" required></div>
+            <div><label for="slPool">Pool</label><select id="slPool" required></select></div>
+            <div><label for="slCoach">Coach</label><select id="slCoach"><option value="">Unassigned</option></select></div>
+            <div><label for="slPrice">Price ($ per slot)</label><input type="number" id="slPrice" min="0" step="0.01" required></div>
           </div>
           <div class="msg" id="slotMsg"></div>
           <button class="btn" style="margin-top:14px;">Publish slots</button>
@@ -133,15 +138,15 @@
         <h3>Export to CSV</h3>
         <p class="muted">Download all slots in a date range (SignUpGenius-compatible). Unbooked slots are included as blank rows.</p>
         <div class="row" style="align-items:flex-end;">
-          <div><label>Range</label><select id="bkRange">
+          <div><label for="bkRange">Range</label><select id="bkRange">
             <option value="this-week">This week</option>
             <option value="last-week">Last week</option>
             <option value="this-month" selected>This month</option>
             <option value="last-month">Last month</option>
             <option value="custom">Custom…</option>
           </select></div>
-          <div class="bkCustom" style="display:none;"><label>From</label><input type="date" id="bkFrom"></div>
-          <div class="bkCustom" style="display:none;"><label>To</label><input type="date" id="bkTo"></div>
+          <div class="bkCustom" style="display:none;"><label for="bkFrom">From</label><input type="date" id="bkFrom"></div>
+          <div class="bkCustom" style="display:none;"><label for="bkTo">To</label><input type="date" id="bkTo"></div>
           <div><button class="btn" id="bkExport" type="button">&#11015; Download CSV</button></div>
         </div>
         <div class="msg" id="bkExportMsg"></div>
@@ -154,17 +159,17 @@
         <h3>History</h3>
         <p class="muted">Past lessons, including cancelled ones. Newest first.</p>
         <div class="row" style="align-items:flex-end;">
-          <div><label>Range</label><select id="hxRange">
+          <div><label for="hxRange">Range</label><select id="hxRange">
             <option value="this-month">This month</option>
             <option value="last-month">Last month</option>
             <option value="last-3-months" selected>Last 3 months</option>
             <option value="this-year">This year</option>
             <option value="custom">Custom…</option>
           </select></div>
-          <div class="hxCustom" style="display:none;"><label>From</label><input type="date" id="hxFrom"></div>
-          <div class="hxCustom" style="display:none;"><label>To</label><input type="date" id="hxTo"></div>
-          <div><label>Coach</label><select id="hxCoach"><option value="">All coaches</option></select></div>
-          <div><label>Pool</label><select id="hxPool"><option value="">All pools</option></select></div>
+          <div class="hxCustom" style="display:none;"><label for="hxFrom">From</label><input type="date" id="hxFrom"></div>
+          <div class="hxCustom" style="display:none;"><label for="hxTo">To</label><input type="date" id="hxTo"></div>
+          <div><label for="hxCoach">Coach</label><select id="hxCoach"><option value="">All coaches</option></select></div>
+          <div><label for="hxPool">Pool</label><select id="hxPool"><option value="">All pools</option></select></div>
         </div>
         <div class="row" style="align-items:flex-end; margin-top:8px;">
           <div><button class="btn secondary" id="hxApply" type="button">Apply filters</button></div>
@@ -207,7 +212,7 @@
         <h3>Revenue by hour &amp; day</h3>
         <p class="muted">Confirmed bookings in the pool's timezone — rows are the hour a lesson starts, columns the day of week. Like the paper sheet.</p>
         <div class="row" style="align-items:flex-end;">
-          <div><label>Range</label><select id="rgRange">
+          <div><label for="rgRange">Range</label><select id="rgRange">
             <option value="this-week" selected>This week</option>
             <option value="this-month">This month</option>
             <option value="this-year">This year</option>
@@ -215,8 +220,8 @@
             <option value="last-month">Last month</option>
             <option value="custom">Custom&hellip;</option>
           </select></div>
-          <div class="rgCustom" style="display:none;"><label>From</label><input type="date" id="rgFrom"></div>
-          <div class="rgCustom" style="display:none;"><label>To</label><input type="date" id="rgTo"></div>
+          <div class="rgCustom" style="display:none;"><label for="rgFrom">From</label><input type="date" id="rgFrom"></div>
+          <div class="rgCustom" style="display:none;"><label for="rgTo">To</label><input type="date" id="rgTo"></div>
           <div><button class="btn secondary" id="rgApply" type="button">Apply</button></div>
           <div><button class="btn" id="rgExport" type="button">&#11015; Export revenue (CSV)</button></div>
         </div>
@@ -226,16 +231,16 @@
       <div class="card">
         <h3>Revenue</h3>
         <div class="row" style="align-items:flex-end;">
-          <div><label>Group by</label><select id="revPeriod">
+          <div><label for="revPeriod">Group by</label><select id="revPeriod">
             <option value="week" selected>Week</option>
             <option value="month">Month</option>
             <option value="year">Year</option>
           </select></div>
-          <div><label>Year</label><select id="revYear"><option value="">All years</option></select></div>
-          <div><label>Coach</label><select id="revCoach"><option value="">All coaches</option></select></div>
+          <div><label for="revYear">Year</label><select id="revYear"><option value="">All years</option></select></div>
+          <div><label for="revCoach">Coach</label><select id="revCoach"><option value="">All coaches</option></select></div>
         </div>
         <div class="row" style="align-items:flex-end; margin-top:8px;">
-          <div><label>Default lesson price ($)</label><input type="number" id="defPrice" min="0" step="0.01"></div>
+          <div><label for="defPrice">Default lesson price ($)</label><input type="number" id="defPrice" min="0" step="0.01"></div>
           <div><button class="btn secondary" id="saveDefPrice" type="button" style="margin-bottom:1px;">Save default</button></div>
         </div>
         <div class="msg" id="revMsg"></div>
@@ -258,10 +263,10 @@
         <h3>Add a pool</h3>
         <form id="poolForm">
           <div class="row">
-            <div><label>Name</label><input id="pName" required placeholder="e.g. Kits Pool"></div>
-            <div><label>Address</label><input id="pAddr" placeholder="Street address"></div>
+            <div><label for="pName">Name</label><input id="pName" required placeholder="e.g. Kits Pool"></div>
+            <div><label for="pAddr">Address</label><input id="pAddr" placeholder="Street address"></div>
           </div>
-          <label>Notes</label>
+          <label for="pNotes">Notes</label>
           <input id="pNotes" placeholder="e.g. bring your own lane rope">
           <div class="msg" id="poolMsg"></div>
           <button class="btn" style="margin-top:14px;">Add pool</button>
@@ -278,7 +283,7 @@
       <div class="card" style="max-width: 520px;">
         <h3>My coach profile</h3>
         <p class="muted">Shown on the public "About the Coaches" page if visible.</p>
-        <label>Photo</label>
+        <label for="mePhotoFile">Photo</label>
         <div style="display:flex; align-items:center; gap:14px; margin-bottom:4px;">
           <img id="mePhotoPreview" class="avatar-preview" alt="" style="display:none;">
           <div id="mePhotoFallback" class="coach-avatar" style="margin:0;"></div>
@@ -286,9 +291,9 @@
         </div>
         <p class="muted" style="margin-bottom:0;">Photos are resized to 800px and shown on the public site.</p>
         <form id="meForm">
-          <label>Display name</label>
+          <label for="meName">Display name</label>
           <input id="meName" required>
-          <label>Bio</label>
+          <label for="meBio">Bio</label>
           <textarea id="meBio" rows="4" placeholder="A couple of sentences about you"></textarea>
           <label style="display:flex; align-items:center; gap:8px; margin-top:12px;">
             <input type="checkbox" id="mePublic" style="width:auto;"> Show me on the public site
@@ -300,9 +305,11 @@
     </div>
   </div>
 
+  </main>
+
   <!-- Slot detail modal -->
   <div class="modal-backdrop" id="slotModal">
-    <div class="modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Slot details">
       <h3 id="smTitle"></h3>
       <p class="muted" id="smInfo"></p>
       <div id="smBooking"></div>
@@ -316,23 +323,23 @@
 
   <!-- Edit slot modal -->
   <div class="modal-backdrop" id="editModal">
-    <div class="modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Edit slot">
       <h3>Edit slot</h3>
       <div class="msg error show" id="edBookedWarn" style="display:none;">This lesson is booked — the client will be emailed about the change.</div>
       <form id="editForm">
         <div class="row">
-          <div><label>Date</label><input type="date" id="edDate" required></div>
-          <div><label>Start time</label><input type="time" id="edStart" required></div>
+          <div><label for="edDate">Date</label><input type="date" id="edDate" required></div>
+          <div><label for="edStart">Start time</label><input type="time" id="edStart" required></div>
         </div>
         <div class="row">
-          <div><label>Length (min)</label><select id="edDur">
+          <div><label for="edDur">Length (min)</label><select id="edDur">
             <option>30</option><option>45</option><option>60</option><option>90</option>
           </select></div>
-          <div><label>Price ($)</label><input type="number" id="edPrice" min="0" step="0.01" required></div>
+          <div><label for="edPrice">Price ($)</label><input type="number" id="edPrice" min="0" step="0.01" required></div>
         </div>
         <div class="row">
-          <div><label>Pool</label><select id="edPool" required></select></div>
-          <div><label>Coach</label><select id="edCoach"><option value="">Unassigned</option></select></div>
+          <div><label for="edPool">Pool</label><select id="edPool" required></select></div>
+          <div><label for="edCoach">Coach</label><select id="edCoach"><option value="">Unassigned</option></select></div>
         </div>
         <div class="msg" id="edMsg"></div>
         <div class="row" style="margin-top:16px;">
@@ -345,7 +352,7 @@
 
   <!-- Client detail modal -->
   <div class="modal-backdrop" id="clientModal">
-    <div class="modal" style="max-width: 560px;">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Client details" style="max-width: 560px;">
       <h3 id="cmName"></h3>
       <p class="muted" id="cmContact"></p>
       <p class="muted" id="cmStats"></p>
@@ -579,7 +586,7 @@
 
       // Pool colour legend (only pools that appear this week, plus all active)
       document.getElementById('poolLegend').innerHTML = pools.filter(p => p.active).map(p =>
-        `<span style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;font-size:0.82rem;">
+        `<span style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;font-size:0.875rem;">
           <span style="width:11px;height:11px;border-radius:3px;background:${poolColor(p.id)};display:inline-block;"></span>
           ${esc(p.name)}</span>`).join('');
 
@@ -1185,14 +1192,14 @@
             : `<div class="coach-avatar" style="margin:0;">${esc((c.display_name || '?').charAt(0).toUpperCase())}</div>`}
           <div style="flex:1; min-width:220px;">
             <div class="row">
-              <div><label>Display name</label><input class="tmName" value="${escAttr(c.display_name)}"></div>
-              <div><label>Role</label><select class="tmRole">
+              <div><label>Display name</label><input class="tmName" aria-label="Display name" value="${escAttr(c.display_name)}"></div>
+              <div><label>Role</label><select class="tmRole" aria-label="Role">
                 <option value="coach" ${c.role !== 'admin' ? 'selected' : ''}>Coach</option>
                 <option value="admin" ${c.role === 'admin' ? 'selected' : ''}>Admin</option>
               </select></div>
             </div>
             <label>Bio</label>
-            <textarea class="tmBio" rows="2">${esc(c.bio || '')}</textarea>
+            <textarea class="tmBio" aria-label="Bio" rows="2">${esc(c.bio || '')}</textarea>
             <label style="display:flex; align-items:center; gap:8px; margin-top:8px;">
               <input type="checkbox" class="tmPublic" style="width:auto;" ${c.is_public ? 'checked' : ''}> Show on the public site
             </label>
@@ -1200,7 +1207,7 @@
               <button class="btn small tmSave" type="button">Save</button>
               <button class="btn small secondary tmPhotoBtn" type="button">${c.photo_url ? 'Replace photo' : 'Add photo'}</button>
               <input type="file" accept="image/*" class="tmPhotoFile" style="display:none;">
-              ${c.id === me.id ? '<span class="muted" style="font-size:0.85rem;">(this is you)</span>' : ''}
+              ${c.id === me.id ? '<span class="muted" style="font-size:0.875rem;">(this is you)</span>' : ''}
             </div>
           </div>
         </div>`).join('');
@@ -1654,6 +1661,23 @@
     };
 
     init();
+  </script>
+
+  <script>
+    // ---- accessibility niceties (visual pass; no booking logic) ----
+    // Escape closes the topmost open modal; Tab is trapped inside it.
+    document.addEventListener('keydown', (e) => {
+      const open = document.querySelector('.modal-backdrop.show');
+      if (!open) return;
+      if (e.key === 'Escape') { open.classList.remove('show'); return; }
+      if (e.key !== 'Tab') return;
+      const f = [...open.querySelectorAll('button, [href], input, select, textarea')]
+        .filter((el) => !el.disabled && el.offsetParent !== null);
+      if (!f.length) return;
+      const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { last.focus(); e.preventDefault(); }
+      else if (!e.shiftKey && document.activeElement === last) { first.focus(); e.preventDefault(); }
+    });
   </script>
 </body>
 </html>
