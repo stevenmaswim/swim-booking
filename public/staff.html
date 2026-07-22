@@ -88,9 +88,10 @@
         <h2 id="calLabel"></h2>
         <button class="btn secondary small" id="calNext">Next &rarr;</button>
       </div>
-      <p class="muted" style="margin-bottom:8px;"><span class="badge open">Green</span> = open slot, <span class="badge booked">Blue</span> = booked slot. The left stripe shows the pool. Click a slot for details.</p>
+      <p class="muted" style="margin-bottom:8px;"><span class="badge open">Green</span> = open slot, <span class="badge booked">Blue</span> = booked slot, <span class="badge rained">Indigo</span> = rained out. The left stripe shows the pool. Click a slot for details.</p>
       <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
         <div id="poolLegend"></div>
+        <button class="btn small danger" id="rainDayBtn" type="button" style="display:none;">Rain out day&hellip;</button>
         <button class="btn small secondary" id="weekExport" type="button" title="Hours log for the displayed week, in the pool's timezone">&#11015; Export week (CSV)</button>
       </div>
       <div id="coachHours"></div>
@@ -307,6 +308,23 @@
 
   </main>
 
+  <!-- Rain out day modal (admins) -->
+  <div class="modal-backdrop" id="rainModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Rain out a day">
+      <h3>Rain out a day</h3>
+      <p class="muted">Marks every open and booked lesson that day as rained out and emails the affected clients. Rain-outs never count against a client and are excluded from revenue.</p>
+      <label for="rnDate">Date</label>
+      <input type="date" id="rnDate">
+      <label for="rnPool">Pool</label>
+      <select id="rnPool"><option value="">All pools</option></select>
+      <div class="msg" id="rnMsg"></div>
+      <div class="row" style="margin-top:16px;">
+        <button type="button" class="btn secondary" id="rnCancel">Back</button>
+        <button type="button" class="btn" id="rnGo">Check impact</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Slot detail modal -->
   <div class="modal-backdrop" id="slotModal">
     <div class="modal" role="dialog" aria-modal="true" aria-label="Slot details">
@@ -316,6 +334,8 @@
       <div class="row" style="margin-top: 18px;">
         <button class="btn secondary" onclick="document.getElementById('slotModal').classList.remove('show')">Close</button>
         <button class="btn" id="smEdit" style="display:none;">Edit</button>
+        <button class="btn secondary" id="smRain" style="display:none;">Mark rained out</button>
+        <button class="btn secondary" id="smUndoRain" style="display:none;">Undo rain-out</button>
         <button class="btn danger" id="smDelete">Cancel slot</button>
       </div>
     </div>
@@ -399,6 +419,12 @@
       if (type === 'success') setTimeout(() => el.className = 'msg', 3500);
     }
     function localISO(dateStr, timeStr) { return new Date(dateStr + 'T' + timeStr).toISOString(); }
+    // One badge renderer for every slot/booking status (incl. rained_out)
+    function statusBadge(st) {
+      const cls = st === 'open' ? 'open' : st === 'rained_out' ? 'rained'
+        : (st === 'booked' || st === 'confirmed') ? 'booked' : 'cancelled';
+      return `<span class="badge ${cls}">${st === 'rained_out' ? 'rained out' : esc(st)}</span>`;
+    }
 
     // ---- Late-cancellation monitor (informational only) ----
     // "Late" = cancelled less than 24h before the lesson start. Bookings
@@ -494,6 +520,7 @@
       isAdmin = adm === true;
       document.getElementById('revTabBtn').style.display = isAdmin ? '' : 'none';
       document.getElementById('teamTabBtn').style.display = isAdmin ? '' : 'none';
+      document.getElementById('rainDayBtn').style.display = isAdmin ? '' : 'none';
       await loadBaseData();
       if (!myProfile) await createMissingProfile();
       document.getElementById('whoami').textContent = myProfile ? myProfile.display_name : user.email;
@@ -578,7 +605,7 @@
 
       // No '*': the price column is deliberately not readable via the API
       const sl = await db.from('slots')
-        .select('id, pool_id, coach_id, starts_at, duration_min, status, profiles!coach_id(display_name), pools(name)')
+        .select('id, pool_id, coach_id, starts_at, duration_min, status, rained_out_at, profiles!coach_id(display_name), pools(name)')
         .gte('starts_at', calStart.toISOString()).lt('starts_at', end.toISOString())
         .neq('status', 'cancelled');
       if (sl.error)
@@ -655,10 +682,10 @@
           const w = 60 / cluster.length;   // blocks occupy the 40%..100% band
           cluster.forEach((b, i) => {
             place(+dayIdx, b.startMin, b.endMin,
-              b.s.status === 'open' ? 'slot-open' : 'slot-booked',
+              b.s.status === 'open' ? 'slot-open' : b.s.status === 'rained_out' ? 'slot-rained' : 'slot-booked',
               `left:${(40 + i * w).toFixed(3)}%;right:auto;width:calc(${w.toFixed(3)}% - 2px);z-index:2;border-left-color:${poolColor(b.s.pool_id)};`,
-              `<span class="cb-line">${fmtTime(b.st)}</span><span class="cb-line">${esc(b.s.pools?.name || '')}</span>`,
-              `${b.s.status.toUpperCase()} — ${fmtTime(b.st)} ${b.s.pools?.name || ''}` +
+              `<span class="cb-line">${fmtTime(b.st)}</span><span class="cb-line">${b.s.status === 'rained_out' ? 'Rained out' : esc(b.s.pools?.name || '')}</span>`,
+              `${b.s.status === 'rained_out' ? 'RAINED OUT' : b.s.status.toUpperCase()} — ${fmtTime(b.st)} ${b.s.pools?.name || ''}` +
               (b.s.profiles ? ' · ' + b.s.profiles.display_name : ''),
               () => openSlotModal(b.s), b.s.id);
           });
@@ -690,21 +717,100 @@
       }).join('');
     }
 
+    // ================= Rain-out actions =================
+    // Rained-out lessons are weather closures: booking kept, never counted
+    // as a client cancellation, excluded from revenue (DB enforces all of
+    // this — see migration_v9.sql). Emails go via the edge function, which
+    // dedupes to one email per client.
+    function notifyRainOut(bookingIds) {
+      const ids = (bookingIds || []).filter(Boolean);
+      if (!ids.length) return;
+      db.functions.invoke('emails', { body: { type: 'rain_out', booking_ids: ids } }).catch(() => {});
+    }
+    async function rainOutOne(slotId, isBooked) {
+      if (!confirm(isBooked
+        ? 'Mark this BOOKED lesson as rained out? The client keeps a clean record and gets a weather email with a rebook link.'
+        : 'Mark this open slot as rained out?')) return;
+      const { data, error } = await db.rpc('rain_out_slot', { p_slot_id: slotId });
+      if (error) { showMsg('dashMsg', 'Could not rain out: ' + error.message, 'error'); return; }
+      if (data && data.booking_id) notifyRainOut([data.booking_id]);
+      document.getElementById('slotModal').classList.remove('show');
+      showMsg('dashMsg', 'Marked rained out.' + (data && data.booking_id ? ' The client has been emailed.' : ''), 'success');
+      renderCalendar(); loadSlotAdmin(); loadBookings();
+    }
+    async function undoRainOut(slotId) {
+      if (!confirm('Weather cleared? This restores the slot (and its booking, if it had one).')) return;
+      const { data, error } = await db.rpc('undo_rain_out', { p_slot_id: slotId });
+      if (error) { showMsg('dashMsg', 'Could not undo: ' + error.message, 'error'); return; }
+      document.getElementById('slotModal').classList.remove('show');
+      showMsg('dashMsg', `Restored to ${data.restored}.`, 'success');
+      renderCalendar(); loadSlotAdmin(); loadBookings();
+      if (typeof loadHistory === 'function' && document.getElementById('tab-history').style.display !== 'none') loadHistory();
+    }
+
+    // Bulk: whole day (admin-only; RPC enforces). Two-phase: dry-run count
+    // first so the admin confirms exactly what will be marked.
+    let rnPreview = null;
+    document.getElementById('rainDayBtn').onclick = () => {
+      rnPreview = null;
+      document.getElementById('rnDate').value = ymd(new Date());
+      const ps = document.getElementById('rnPool');
+      ps.innerHTML = '<option value="">All pools</option>';
+      pools.filter(p => p.active).forEach(p =>
+        ps.insertAdjacentHTML('beforeend', `<option value="${p.id}">${esc(p.name)}</option>`));
+      const m = document.getElementById('rnMsg'); m.textContent = ''; m.className = 'msg';
+      document.getElementById('rnGo').textContent = 'Check impact';
+      document.getElementById('rainModal').classList.add('show');
+    };
+    document.getElementById('rnCancel').onclick = () =>
+      document.getElementById('rainModal').classList.remove('show');
+    ['rnDate', 'rnPool'].forEach(id => document.getElementById(id).addEventListener('change', () => {
+      rnPreview = null;
+      document.getElementById('rnGo').textContent = 'Check impact';
+    }));
+    document.getElementById('rnGo').onclick = async () => {
+      const btn = document.getElementById('rnGo');
+      const day = document.getElementById('rnDate').value;
+      if (!day) { showMsg('rnMsg', 'Pick a date.', 'error'); return; }
+      const args = { p_day: day, p_pool_id: document.getElementById('rnPool').value || null, p_tz: BUSINESS_TIMEZONE };
+      btn.disabled = true;
+      if (!rnPreview) {
+        const { data, error } = await db.rpc('rain_out_day', { ...args, p_dry_run: true });
+        btn.disabled = false;
+        if (error) { showMsg('rnMsg', error.message, 'error'); return; }
+        if (!data.open && !data.booked) { showMsg('rnMsg', 'No open or booked lessons on that day.', 'error'); return; }
+        rnPreview = data;
+        const m = document.getElementById('rnMsg');
+        m.textContent = `${data.booked} booked and ${data.open} open lesson${data.booked + data.open === 1 ? '' : 's'} will be marked rained out.`;
+        m.className = 'msg show success';
+        btn.textContent = 'Confirm rain-out';
+        return;
+      }
+      const { data, error } = await db.rpc('rain_out_day', { ...args, p_dry_run: false });
+      btn.disabled = false;
+      if (error) { showMsg('rnMsg', error.message, 'error'); return; }
+      notifyRainOut(data.booking_ids);
+      document.getElementById('rainModal').classList.remove('show');
+      showMsg('dashMsg', `Rained out ${data.booked + data.open} lesson${data.booked + data.open === 1 ? '' : 's'}.` +
+        (data.booked ? ` ${data.booked} client email${data.booked === 1 ? '' : 's'} on the way.` : ''), 'success');
+      renderCalendar(); loadSlotAdmin(); loadBookings();
+    };
+
     document.getElementById('calPrev').onclick = () => { calStart.setDate(calStart.getDate() - 7); renderCalendar(); };
     document.getElementById('calNext').onclick = () => { calStart.setDate(calStart.getDate() + 7); renderCalendar(); };
 
     // ================= Slot detail modal =================
     async function openSlotModal(s) {
       const st = new Date(s.starts_at);
-      document.getElementById('smTitle').textContent = (s.status === 'open' ? 'Open slot' : 'Booked slot');
+      document.getElementById('smTitle').textContent = (s.status === 'open' ? 'Open slot' : s.status === 'rained_out' ? 'Rained-out slot' : 'Booked slot');
       document.getElementById('smInfo').textContent =
         `${fmtDT(st)} · ${s.duration_min} min · ${s.pools?.name || ''}` +
         (s.profiles ? ` · Coach ${s.profiles.display_name}` : '');
       const bEl = document.getElementById('smBooking');
       bEl.innerHTML = '';
-      if (s.status === 'booked') {
+      if (s.status === 'booked' || s.status === 'rained_out') {
         const { data } = await db.from('bookings').select('*')
-          .eq('slot_id', s.id).eq('status', 'confirmed').maybeSingle();
+          .eq('slot_id', s.id).eq('status', s.status === 'booked' ? 'confirmed' : 'rained_out').maybeSingle();
         if (data) bEl.innerHTML = `
           <div class="card" style="margin-top:12px; padding:14px; background:#f8fafc; box-shadow:none;">
             <strong>${esc(data.student_name)}</strong>${data.parent_name ? ` <span class="muted">(parent: ${esc(data.parent_name)})</span>` : ''}<br>
@@ -713,10 +819,18 @@
       }
       // Coaches may only cancel/edit their own slots; admins any (DB enforces too)
       const canManage = isAdmin || s.coach_id === me.id;
+      const isRained = s.status === 'rained_out';
       const smEdit = document.getElementById('smEdit');
-      smEdit.style.display = canManage ? '' : 'none';
+      smEdit.style.display = canManage && !isRained ? '' : 'none';
       smEdit.onclick = () => { document.getElementById('slotModal').classList.remove('show'); openEditModal(s.id); };
-      document.getElementById('smDelete').style.display = canManage ? '' : 'none';
+      // Rain-out: coach on own slots, admin on any; undo: admin, future only
+      const smRain = document.getElementById('smRain');
+      smRain.style.display = canManage && !isRained ? '' : 'none';
+      smRain.onclick = () => rainOutOne(s.id, s.status === 'booked');
+      const smUndo = document.getElementById('smUndoRain');
+      smUndo.style.display = isAdmin && isRained && new Date(s.starts_at) > new Date() ? '' : 'none';
+      smUndo.onclick = () => undoRainOut(s.id);
+      document.getElementById('smDelete').style.display = canManage && !isRained ? '' : 'none';
       document.getElementById('smDelete').onclick = async () => {
         if (!confirm(s.status === 'booked'
           ? 'This slot is BOOKED. Cancelling removes the booking too. Continue?'
@@ -809,16 +923,21 @@
           // Coaches may only cancel their own slots (DB enforces this too)
           const can = isAdmin || s.coach_id === me.id;
           return `<tr>
-          <td>${can ? `<input type="checkbox" class="rowSel" data-id="${s.id}" data-status="${s.status}">` : ''}</td>
+          <td>${can && s.status !== 'rained_out' ? `<input type="checkbox" class="rowSel" data-id="${s.id}" data-status="${s.status}" aria-label="Select slot">` : ''}</td>
           <td>${fmtDT(new Date(s.starts_at))} (${s.duration_min}m)</td>
           <td>${esc(s.pools?.name || '')}</td>
           <td>${esc(s.profiles?.display_name || '—')}</td>
-          <td><span class="badge ${s.status}">${s.status}</span></td>
-          <td style="white-space:nowrap;">${can ? `<button class="btn small secondary" data-edit="${s.id}">Edit</button>
+          <td>${statusBadge(s.status)}</td>
+          <td style="white-space:nowrap;">${s.status === 'rained_out'
+            ? (isAdmin && new Date(s.starts_at) > new Date() ? `<button class="btn small secondary" data-undorain="${s.id}">Undo rain-out</button>` : '')
+            : can ? `<button class="btn small secondary" data-edit="${s.id}">Edit</button>
+            <button class="btn small secondary" data-rain="${s.id}" data-booked="${s.status === 'booked'}">Rain out</button>
             <button class="btn small danger" data-cancel="${s.id}" data-status="${s.status}">Cancel</button>` : ''}</td>
         </tr>`;
         }).join('') + '</table>';
       el.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openEditModal(b.dataset.edit));
+      el.querySelectorAll('[data-rain]').forEach(b => b.onclick = () => rainOutOne(b.dataset.rain, b.dataset.booked === 'true'));
+      el.querySelectorAll('[data-undorain]').forEach(b => b.onclick = () => undoRainOut(b.dataset.undorain));
 
       const rowSels = () => Array.from(el.querySelectorAll('.rowSel'));
       const checked = () => rowSels().filter(c => c.checked);
@@ -892,7 +1011,8 @@
           s.lessons++;
           const t = b.slots ? b.slots.starts_at : null;
           if (t && (!s.last || t > s.last)) s.last = t;
-        } else {
+        } else if (b.status === 'cancelled') {
+          // rained_out is neither a lesson nor a client cancellation
           s.cancelled++;
           if (lateCancelMs(b, b.slots ? b.slots.starts_at : null) != null) s.late++;
         }
@@ -979,7 +1099,7 @@
           <td>${esc(b.student_name)}</td>
           <td>${esc(b.slots?.pools?.name || '')}</td>
           <td>${esc(b.slots?.profiles?.display_name || '—')}</td>
-          <td><span class="badge ${b.status === 'confirmed' ? 'booked' : 'cancelled'}">${b.status}</span>${cancelledWhenHtml(b, b.slots?.starts_at)}</td>
+          <td>${statusBadge(b.status)}${cancelledWhenHtml(b, b.slots?.starts_at)}</td>
         </tr>`).join('') + '</table>';
     }
 
@@ -1024,7 +1144,10 @@
     }
     function renderRevenue(r, period) {
       document.getElementById('revTotals').innerHTML =
-        `<strong>${money(r.total_revenue)}</strong> total revenue · <strong>${r.total_lessons}</strong> lessons (all confirmed bookings)`;
+        `<strong>${money(r.total_revenue)}</strong> total revenue · <strong>${r.total_lessons}</strong> lessons (all confirmed bookings)` +
+        (Number(r.rained_lessons) > 0
+          ? `<br><span class="muted">Rained out: ${r.rained_lessons} lesson${r.rained_lessons === 1 ? '' : 's'} (${money(r.rained_revenue)} not realized)</span>`
+          : '');
       const tbl = (rows, nameKey, nameLabel) => !rows.length
         ? '<p class="empty">No confirmed bookings yet.</p>'
         : `<table><tr><th>${nameLabel}</th><th>Lessons</th><th>Revenue</th></tr>` +
@@ -1280,7 +1403,7 @@
         const pc = perCoach[coach] = perCoach[coach] || { booked: 0, open: 0 };
         if (s.status === 'booked') pc.booked += s.duration_min; else pc.open += s.duration_min;
         lines.push([start.date, start.day, start.time, endT.time, s.duration_min,
-          s.pools?.name || '', coach, s.status, student].map(csvField).join(','));
+          s.pools?.name || '', coach, s.status === 'rained_out' ? 'RAINED OUT' : s.status, student].map(csvField).join(','));
       }
       const hrs = m => (m / 60).toFixed(2);
       lines.push('');
@@ -1295,7 +1418,7 @@
     // ================= Revenue: hour-of-day × day-of-week grid =================
     // Admin-only, enforced by get_revenue_grid() in the database.
     const RG_DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-    let rgCells = [], rgSpan = null;
+    let rgCells = [], rgSpan = null, rgRained = null;
     function rgHourLabel(h) { return `${h % 12 || 12} ${h < 12 ? 'AM' : 'PM'}`; }
     function rgRangeDates() {
       return presetRange(document.getElementById('rgRange').value,
@@ -1310,7 +1433,7 @@
         p_tz: BUSINESS_TIMEZONE
       });
       if (error) { showMsg('rgMsg', 'Could not load the grid: ' + error.message, 'error'); return; }
-      rgCells = data.cells || []; rgSpan = { start, end };
+      rgCells = data.cells || []; rgRained = data.rained || null; rgSpan = { start, end };
       renderRevGrid();
     }
     // Build the {hour × dow} matrix. Always shows 6 AM–10 PM like the paper
@@ -1326,7 +1449,10 @@
     }
     function renderRevGrid() {
       const el = document.getElementById('rgGrid');
-      if (!rgCells.length) { el.innerHTML = '<p class="empty">No confirmed bookings in this range.</p>'; return; }
+      const rainedLine = rgRained && Number(rgRained.lessons) > 0
+        ? `<p class="muted" id="rgRainedLine" style="margin-top:10px;">Rained out: ${rgRained.lessons} lesson${rgRained.lessons === 1 ? '' : 's'} (${money(rgRained.revenue)} not realized)</p>`
+        : '';
+      if (!rgCells.length) { el.innerHTML = '<p class="empty">No confirmed bookings in this range.</p>' + rainedLine; return; }
       const { map, minH, maxH } = rgMatrix();
       const colTot = Array(8).fill(0); // 1..7
       let grand = 0;
@@ -1347,7 +1473,7 @@
       html += '<tr><th class="tot">Total</th>' +
         RG_DAYS.map((_, i) => `<td class="tot">${colTot[i + 1] ? money(colTot[i + 1]) : ''}</td>`).join('') +
         `<td class="tot">${money(grand)}</td></tr></table>`;
-      el.innerHTML = html;
+      el.innerHTML = html + rainedLine;
 
       // Per-coach tooltip: hover shows/follows, click/tap pins & toggles.
       el.querySelectorAll('td[data-rg]').forEach(td => {
@@ -1449,6 +1575,8 @@
       const bs = slot.bookings || [];
       const confirmed = bs.find(b => b.status === 'confirmed');
       if (confirmed) return { b: confirmed, cancelled: false };
+      const rained = bs.find(b => b.status === 'rained_out');
+      if (rained) return { b: rained, cancelled: false, rained: true };
       if (includeCancelled) {
         const c = bs.filter(b => b.status === 'cancelled')
           .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
@@ -1464,9 +1592,10 @@
         const end = new Date(start.getTime() + (s.duration_min || 0) * 60000);
         const loc = (s.pools && (s.pools.address || s.pools.name)) || '';
         const item = (s.profiles && s.profiles.display_name) || '';
-        const { b, cancelled } = pickBooking(s, includeCancelled);
+        const { b, cancelled, rained } = pickBooking(s, includeCancelled);
         let comment = b ? (b.parent_name || '') : '';
         if (cancelled) comment = 'CANCELLED' + (comment ? ' ' + comment : '');
+        if (rained || s.status === 'rained_out') comment = 'RAINED OUT' + (comment ? ' ' + comment : '');
         const phone = b ? (b.phone || '') : '';
         lines.push(csvRow([
           csvDateTime(start), csvDateTime(end), loc, '1', item,
@@ -1568,15 +1697,17 @@
           const who = b ? ((b.first_name || '') + ' ' + (b.last_name || '')).trim() : '';
           // Admins may reopen a future cancelled slot (DB gate: reopen_slot)
           const canReopen = isAdmin && s.status === 'cancelled' && new Date(s.starts_at) > new Date();
+          const canUndoRain = isAdmin && s.status === 'rained_out' && new Date(s.starts_at) > new Date();
           return `<tr>
             <td>${fmtDT(new Date(s.starts_at))} (${s.duration_min}m)</td>
             <td>${esc(s.pools?.name || '')}</td>
             <td>${esc(s.profiles?.display_name || '—')}</td>
             <td>${esc(who) || '—'}</td>
-            <td><span class="badge ${s.status === 'booked' ? 'booked' : s.status === 'cancelled' ? 'cancelled' : 'open'}">${esc(s.status)}</span>${b ? cancelledWhenHtml(b, s.starts_at) : ''}</td>
-            <td>${canReopen ? `<button class="btn small secondary" data-reopen="${s.id}">Reopen</button>` : ''}</td>
+            <td>${statusBadge(s.status)}${b ? cancelledWhenHtml(b, s.starts_at) : ''}</td>
+            <td>${canReopen ? `<button class="btn small secondary" data-reopen="${s.id}">Reopen</button>` : canUndoRain ? `<button class="btn small secondary" data-undorain="${s.id}">Undo rain-out</button>` : ''}</td>
           </tr>`;
         }).join('') + '</table>';
+      el.querySelectorAll('[data-undorain]').forEach(btn => btn.onclick = () => undoRainOut(btn.dataset.undorain));
       el.querySelectorAll('[data-reopen]').forEach(btn => btn.onclick = async () => {
         if (!confirm('Reopen this cancelled slot so clients can book it again?')) return;
         const { error } = await db.rpc('reopen_slot', { p_slot_id: btn.dataset.reopen });

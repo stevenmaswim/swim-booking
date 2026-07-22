@@ -145,11 +145,16 @@
 
     function card(b, cancellable) {
       const cancelled = b.status !== 'confirmed';
+      // Rained-out is the pool's closure, not the client's cancellation —
+      // show it distinctly.
+      const badge = b.status === 'rained_out'
+        ? '<span class="badge rained">rained out</span>'
+        : cancelled ? '<span class="badge cancelled">cancelled</span>' : '';
       return `<div class="card" style="${cancelled ? 'opacity:0.7;' : ''}">
         <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;">
           <div>
             <strong>${esc(fmtWhen(b.starts_at))}</strong> · ${b.duration_min} min
-            ${cancelled ? '<span class="badge cancelled">cancelled</span>' : ''}
+            ${badge}
             <div class="muted">${esc(b.pool_name || '')}${b.pool_address ? ' — ' + esc(b.pool_address) : ''}</div>
             <div class="muted">Coach ${esc(b.coach || 'TBD')} · Student ${esc(b.first_name || b.student_name || '')}</div>
           </div>

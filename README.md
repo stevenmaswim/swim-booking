@@ -31,11 +31,11 @@ root (`https://ksjswimming.com/`), so Astro needs no `base` path; if you ever dr
 custom domain and serve from `https://USER.github.io/REPO/`, set `base: "/REPO"` in
 `astro.config.mjs` and re-check absolute links in the booking pages.
 
-**Real photos:** the homepage hero uses a placeholder (`public/hero-swim.svg`) — drop a
-real lesson photo into `public/` (e.g. `hero.jpg`) and point `src/components/hero.astro`
-at it (there's a `TODO` at the spot). Coach and pool photos come from Supabase Storage
-via the staff dashboard, same as before. Placeholder parent quotes live in
-`src/components/testimonials.astro`, also `TODO`-marked.
+**Real photos:** the homepage hero and the location-card fallback use stock stand-ins
+(`public/images/hero-pool.jpg`, `pool-generic.jpg` — Unsplash, source URLs in comments).
+Drop real KSJ photos into `public/images/` and update the `TODO`-marked spots in
+`src/components/hero.astro` / `src/pages/index.astro`. Coach and pool photos come from
+Supabase Storage via the staff dashboard, same as before.
 
 ## What's included
 
@@ -54,7 +54,8 @@ via the staff dashboard, same as before. Placeholder parent quotes live in
 | `supabase/migration_v5.sql` | Slot editing + history/export support |
 | `supabase/migration_v6.sql` | Late-cancel monitor, admin Team management, admin slot reopen, hour×day revenue grid, multi-slot booking with email verification |
 | `supabase/migration_v7.sql` | Revenue grid cells gain a per-coach breakdown |
-| `supabase/migration_v8.sql` | Per-student overlap rule: one email can book different kids into simultaneous lessons (run last) |
+| `supabase/migration_v8.sql` | Per-student overlap rule: one email can book different kids into simultaneous lessons |
+| `supabase/migration_v9.sql` | Rain-out tracking: weather closures distinct from cancellations, excluded from revenue (run last) |
 | `supabase/verify_v6.sql` | Post-migration test suite for the SQL Editor — reports PASS/FAIL in a deliberate final "error", rolls everything back |
 | `supabase/verify_v6_api.mjs` | Permission checks against the live REST API with real staff JWTs |
 | `supabase/functions/emails/` | Edge Function that sends confirmation, reminder, and login-code emails via Resend |
@@ -76,7 +77,8 @@ via the staff dashboard, same as before. Placeholder parent quotes live in
 8. Same again for `supabase/migration_v6.sql` → **Run**. This adds the late-cancellation monitor, the admin **Team** tab, admin slot reopen, the hour×day revenue grid, and **multi-slot booking with email verification**. ⚠️ v6 **replaces the booking RPC** (`book_slot` → `book_slots` with a verification code): run it and push the updated `book.html` **at the same time**, and redeploy the `emails` Edge Function — an old page against a new database (or vice-versa) can't take bookings.
 9. Same again for `supabase/migration_v7.sql` → **Run**. Each revenue-grid cell now includes a per-coach breakdown (shown as a hover/tap tooltip in the Revenue tab). Frontend-only additions ride along in `staff.html`: per-coach booked/open hours under the calendar legend, and cancellation timestamps on cancelled bookings.
 10. Same again for `supabase/migration_v8.sql` → **Run**. Bookings carry a **student per lesson**: one parent email can book two different kids into simultaneous lessons; only the *same* student is blocked from overlapping times (in the checkout and against existing bookings, and when staff move a booked slot). ⚠️ The `book_slots` call shape changed — run this **together with** pushing the updated `book.html` and redeploying the `emails` Edge Function.
-11. **Verify it worked:** paste `supabase/verify_v6.sql` into the SQL Editor → **Run**. The run **ends in an ERROR on purpose** — the error message *is* the report (the editor hides notices, and erroring out forces Postgres to roll back all the test data). Read the PASS/FAIL lines in it; the first line is the summary. For an end-to-end check with real logins, see `supabase/verify_v6_api.mjs` (header comment explains usage).
+11. Same again for `supabase/migration_v9.sql` → **Run**, and redeploy the `emails` Edge Function (it gained the weather email). **Rain-out tracking:** outdoor lessons cancelled by weather get their own `rained_out` status — the booking is kept, it never counts as a client cancellation or toward late-cancel stats, and it is excluded from revenue (shown instead as "Rained out: N lessons ($X not realized)"). Staff mark single slots (coaches: own; admins: any) or a whole day at once (admin-only "Rain out day…" on the calendar, with a dry-run confirmation); affected clients automatically get one weather email each (deduped) with a rebook link; admins can undo before the lesson time if the sky clears.
+12. **Verify it worked:** paste `supabase/verify_v6.sql` into the SQL Editor → **Run**. The run **ends in an ERROR on purpose** — the error message *is* the report (the editor hides notices, and erroring out forces Postgres to roll back all the test data). Read the PASS/FAIL lines in it; the first line is the summary. For an end-to-end check with real logins, see `supabase/verify_v6_api.mjs` (header comment explains usage).
 6. **Allowlist your staff.** Anyone with a Google account can *sign in*, but only emails in the `staff_emails` table can use the dashboard (enforced in the database, not just the UI). In the SQL Editor:
    ```sql
    insert into public.staff_emails (email) values
@@ -209,7 +211,7 @@ Before sharing the booking link with real families. (Full audit: `PRELAUNCH_AUDI
 1. **Migrations** — in the SQL Editor, run in order: `schema.sql` →
    `migration_google_auth.sql` → `migration_clients_revenue.sql` → `migration_v3.sql`
    → `migration_v4.sql` → `migration_security.sql` → `migration_v5.sql` →
-   `migration_v6.sql` → `migration_v7.sql` → `migration_v8.sql`. (Idempotent from v5 on — safe to re-run.)
+   `migration_v6.sql` → `migration_v7.sql` → `migration_v8.sql` → `migration_v9.sql`. (Idempotent from v5 on — safe to re-run.)
 2. **Edge Function secrets** — `supabase secrets set … RESEND_API_KEY / FROM_EMAIL /
    SITE_URL / BUSINESS_TIMEZONE / CRON_SECRET` (§3b).
 3. **Deploy the Edge Function** — `supabase functions deploy emails --no-verify-jwt`

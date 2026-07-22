@@ -188,6 +188,58 @@ async function handleConfirmation(body: { booking_id?: string; booking_ids?: str
   return json({ ok: true });
 }
 
+// ---------- Rained out (weather closure — NOT a client cancellation) ----------
+// One email per client even when a whole day is rained out at once: rows are
+// grouped by address and each client gets a single email listing all of
+// their affected lessons. Recipients + content are fully DB-derived (only
+// bookings actually in status 'rained_out' are ever included), so this is
+// not an open relay even though the function deploys with --no-verify-jwt.
+async function handleRainOut(body: { booking_ids?: string[] }) {
+  const ids = (Array.isArray(body.booking_ids) ? body.booking_ids : [])
+    .map(String).slice(0, 50);
+  if (!ids.length) return json({ error: "booking_ids required" }, 400);
+
+  const { data, error } = await sb.from("bookings")
+    .select("email, first_name, student_name, parent_name, slots(starts_at, duration_min, pools(name))")
+    .in("id", ids).eq("status", "rained_out");
+  if (error) return json({ error: error.message }, 500);
+  if (!data?.length) return json({ ok: true, sent: 0 });
+
+  const byEmail = new Map<string, any[]>();
+  for (const b of data as any[]) {
+    if (!byEmail.has(b.email)) byEmail.set(b.email, []);
+    byEmail.get(b.email)!.push(b);
+  }
+
+  let sent = 0;
+  for (const [email, rows] of byEmail) {
+    rows.sort((a, b) => String(a.slots.starts_at).localeCompare(String(b.slots.starts_at)));
+    const n = rows.length;
+    const lines = rows.map((b: any) => `
+      <li style="margin-bottom:6px;"><strong>${esc(fmtWhen(b.slots.starts_at))}</strong>
+        — ${esc(b.student_name || b.first_name || "")} at ${esc(b.slots.pools?.name || "the pool")}</li>`).join("");
+    try {
+      await sendEmail(email,
+        n === 1 ? "Your KSJ Swimming lesson was rained out 🌧"
+                : `Your ${n} KSJ Swimming lessons were rained out 🌧`,
+        shell(`
+        <p>Hi ${esc(rows[0].parent_name || rows[0].first_name || "there")}, we're sorry —
+        due to weather we had to cancel ${n === 1 ? "this lesson" : "these lessons"}:</p>
+        <ul style="padding-left:18px;">${lines}</ul>
+        <p>This one's on the weather, not on you — it won't count against your bookings
+        in any way. We'd love to see you back in the water:</p>
+        <p style="margin-top:14px;">
+          <a href="${SITE_URL}/book.html" style="background:#0369a1;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;">Rebook a lesson</a>
+        </p>
+      `));
+      sent++;
+    } catch (e) {
+      console.error("rain-out email failed for", email, e);
+    }
+  }
+  return json({ ok: true, sent });
+}
+
 // ---------- Slot changed (staff edited a booked lesson) ----------
 async function handleSlotUpdate(body: { booking_id?: string; old_start?: string; old_location?: string }) {
   const id = String(body.booking_id ?? "");
@@ -258,6 +310,7 @@ Deno.serve(async (req) => {
       case "otp": return await handleOtp(body);
       case "confirmation": return await handleConfirmation(body);
       case "slot_update": return await handleSlotUpdate(body);
+      case "rain_out": return await handleRainOut(body);
       case "reminders": return await handleReminders(req);
       default: return json({ error: "unknown type" }, 400);
     }

@@ -26,6 +26,8 @@ declare
   v numeric;
   b record;
   tok text;
+  v_day date;
+  v_pool2 uuid := '33333333-3333-3333-3333-333333333334';
 
   -- (plpgsql has no local procedures — the ok/bad pattern is inlined:
   --  ok  → rep := rep || E'\nPASS  <label>'; npass := npass + 1;
@@ -436,6 +438,120 @@ begin
     end;
     execute 'reset role';
   end if;
+
+  -- ==================== F. Rain-out tracking (v9) ====================
+  -- Fixtures on a dedicated far-future local day so day-boundary math is
+  -- deterministic regardless of when this runs.
+  v_day := (now() at time zone 'America/Chicago')::date + 10;
+  insert into public.pools (id, name) values (v_pool2, 'VTest Pool 2');
+  insert into public.slots (id, pool_id, coach_id, starts_at, duration_min, price, status, created_by) values
+    ('44444444-4444-4444-4444-4444444444f1', v_pool,  v_coach, (v_day + time '10:00') at time zone 'America/Chicago', 60, 50, 'open',   v_coach),
+    ('44444444-4444-4444-4444-4444444444f2', v_pool,  v_coach, (v_day + time '11:00') at time zone 'America/Chicago', 60, 50, 'booked', v_coach),
+    ('44444444-4444-4444-4444-4444444444f3', v_pool2, v_coach, (v_day + time '12:00') at time zone 'America/Chicago', 60, 50, 'open',   v_coach),
+    ('44444444-4444-4444-4444-4444444444f4', v_pool,  v_coach, (v_day + 1 + time '10:00') at time zone 'America/Chicago', 60, 50, 'open', v_coach),
+    ('44444444-4444-4444-4444-4444444444f5', v_pool,  v_coach, (v_day + time '15:00') at time zone 'America/Chicago', 60, 50, 'booked', v_coach),
+    ('44444444-4444-4444-4444-4444444444f6', v_pool,  v_coach, now() - interval '3 days', 60, 50, 'rained_out', v_coach);
+  insert into public.bookings (slot_id, student_name, first_name, last_name, email, phone) values
+    ('44444444-4444-4444-4444-4444444444f2', 'Kid Fixture', 'Kid', 'Fixture', 'vtest-f@example.com', '2045550003'),
+    ('44444444-4444-4444-4444-4444444444f5', 'Kid Fixture', 'Kid', 'Fixture', 'vtest-f@example.com', '2045550003');
+  update public.slots set booked_by_display = 'Kid F.'
+  where id in ('44444444-4444-4444-4444-4444444444f2', '44444444-4444-4444-4444-4444444444f5');
+
+  -- F1: coach rains out their OWN booked slot; booking kept, not a cancellation
+  perform set_config('request.jwt.claims',
+    '{"sub":"22222222-2222-2222-2222-222222222222","email":"vtest-coach@example.com","role":"authenticated"}', true);
+  r := public.rain_out_slot('44444444-4444-4444-4444-4444444444f5');
+  select s2.status as sstat, s2.rained_out_by, s2.booked_by_display, bo.status as bstat, bo.cancelled_at
+  into b
+  from public.slots s2 left join public.bookings bo on bo.slot_id = s2.id
+  where s2.id = '44444444-4444-4444-4444-4444444444f5';
+  if b.sstat = 'rained_out' and b.bstat = 'rained_out' and b.rained_out_by = v_coach
+     and b.booked_by_display is null then
+    rep := rep || E'\nPASS  F1: coach rained out own slot — booking kept as rained_out, display cleared, marker recorded'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  F1: ' || coalesce(b.sstat, 'null') || '/' || coalesce(b.bstat, 'null'); nfail := nfail + 1; end if;
+  if b.cancelled_at is null then
+    rep := rep || E'\nPASS  F1b: rain-out sets NO cancelled_at (never a client cancellation)'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  F1b: cancelled_at was set on a rain-out'; nfail := nfail + 1; end if;
+
+  -- F2: coach cannot rain out the ADMIN''s slot
+  begin
+    r := public.rain_out_slot('44444444-4444-4444-4444-444444440093');
+    rep := rep || E'\nFAIL  F2: coach rained out another coach''s slot'; nfail := nfail + 1;
+  exception when others then
+    if sqlerrm like '%own slots%' then rep := rep || E'\nPASS  F2: coach blocked from another coach''s slot'; npass := npass + 1;
+    else rep := rep || E'\nFAIL  F2: unexpected: ' || sqlerrm; nfail := nfail + 1; end if;
+  end;
+
+  -- F3: coach cannot BULK rain out
+  begin
+    r := public.rain_out_day(v_day);
+    rep := rep || E'\nFAIL  F3: coach ran the bulk rain-out'; nfail := nfail + 1;
+  exception when others then
+    if sqlerrm like '%Only admins%' then rep := rep || E'\nPASS  F3: bulk rain-out is admin-only'; npass := npass + 1;
+    else rep := rep || E'\nFAIL  F3: unexpected: ' || sqlerrm; nfail := nfail + 1; end if;
+  end;
+
+  -- back to admin for the rest
+  perform set_config('request.jwt.claims',
+    '{"sub":"11111111-1111-1111-1111-111111111111","email":"vtest-admin@example.com","role":"authenticated"}', true);
+
+  -- F4: dry-run counts, then the real bulk marks ONLY the matching day+pool
+  r := public.rain_out_day(v_day, v_pool, true);
+  if (r->>'dry_run')::boolean and (r->>'open')::int = 1 and (r->>'booked')::int = 1 then
+    rep := rep || E'\nPASS  F4: dry-run counts 1 open + 1 booked (pool-filtered)'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  F4: dry-run ' || r::text; nfail := nfail + 1; end if;
+  r := public.rain_out_day(v_day, v_pool, false);
+  select count(*) filter (where id = '44444444-4444-4444-4444-4444444444f1' and status = 'rained_out')
+       + count(*) filter (where id = '44444444-4444-4444-4444-4444444444f2' and status = 'rained_out') as hit,
+         count(*) filter (where id = '44444444-4444-4444-4444-4444444444f3' and status = 'open')
+       + count(*) filter (where id = '44444444-4444-4444-4444-4444444444f4' and status = 'open') as spared
+  into b from public.slots;
+  if b.hit = 2 and b.spared = 2 and json_array_length((r->'booking_ids')::json) = 1 then
+    rep := rep || E'\nPASS  F4b: bulk marked exactly the matching slots (other pool + other day untouched), 1 booking id returned'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  F4b: hit=' || b.hit || ' spared=' || b.spared || ' ' || r::text; nfail := nfail + 1; end if;
+
+  -- F5: revenue grid EXCLUDES rained lessons and reports the impact
+  r := public.get_revenue_grid((v_day)::timestamp at time zone 'America/Chicago',
+                               (v_day + 1)::timestamp at time zone 'America/Chicago');
+  if json_array_length(r->'cells') = 0
+     and (r->'rained'->>'lessons')::int = 1
+     and (r->'rained'->>'revenue')::numeric = 50 then
+    rep := rep || E'\nPASS  F5: grid excludes rained lessons; impact = 1 lesson / $50 not realized'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  F5: ' || r::text; nfail := nfail + 1; end if;
+
+  -- F6: no rained booking anywhere carries cancelled_at
+  select count(*) into n from public.bookings where status = 'rained_out' and cancelled_at is not null;
+  if n = 0 then rep := rep || E'\nPASS  F6: zero rained bookings have cancelled_at (late-cancel stats untouched)'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  F6: ' || n || ' rained bookings carry cancelled_at'; nfail := nfail + 1; end if;
+
+  -- F7: undo restores a booked slot WITH its booking; past slots refuse
+  r := public.undo_rain_out('44444444-4444-4444-4444-4444444444f2');
+  select s2.status as sstat, s2.booked_by_display, s2.rained_out_at, bo.status as bstat
+  into b
+  from public.slots s2 left join public.bookings bo on bo.slot_id = s2.id
+  where s2.id = '44444444-4444-4444-4444-4444444444f2';
+  if b.sstat = 'booked' and b.bstat = 'confirmed' and b.booked_by_display = 'Kid F.' and b.rained_out_at is null then
+    rep := rep || E'\nPASS  F7: undo restored the booking intact (status, display, audit cleared)'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  F7: ' || coalesce(b.sstat, 'null') || '/' || coalesce(b.bstat, 'null'); nfail := nfail + 1; end if;
+  begin
+    r := public.undo_rain_out('44444444-4444-4444-4444-4444444444f6');
+    rep := rep || E'\nFAIL  F7b: undid a PAST rain-out'; nfail := nfail + 1;
+  exception when others then
+    if sqlerrm like '%passed%' then rep := rep || E'\nPASS  F7b: past rain-outs cannot be undone'; npass := npass + 1;
+    else rep := rep || E'\nFAIL  F7b: unexpected: ' || sqlerrm; nfail := nfail + 1; end if;
+  end;
+
+  -- F8: anon can''t even execute the rain-out RPCs
+  perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+  execute 'set local role anon';
+  begin
+    perform public.rain_out_day(v_day);
+    rep := rep || E'\nFAIL  F8: anon executed rain_out_day'; nfail := nfail + 1;
+  exception when insufficient_privilege then
+    rep := rep || E'\nPASS  F8: anon lacks EXECUTE on rain_out_day (slot/undo RPCs share the grant pattern)'; npass := npass + 1;
+  when others then rep := rep || E'\nFAIL  F8: unexpected: ' || sqlerrm; nfail := nfail + 1;
+  end;
+  execute 'reset role';
 
   -- ==================== report (the exception rolls everything back) ====================
   raise exception using message =
