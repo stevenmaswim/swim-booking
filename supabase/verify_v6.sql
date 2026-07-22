@@ -28,6 +28,8 @@ declare
   tok text;
   v_day date;
   v_pool2 uuid := '33333333-3333-3333-3333-333333333334';
+  v2 numeric;   -- rained revenue before undo (F5/F5b delta)
+  v3 numeric;   -- cells revenue after undo
 
   -- (plpgsql has no local procedures — the ok/bad pattern is inlined:
   --  ok  → rep := rep || E'\nPASS  <label>'; npass := npass + 1;
@@ -510,13 +512,16 @@ begin
     rep := rep || E'\nPASS  F4b: bulk marked exactly the matching slots (other pool + other day untouched), 1 booking id returned'; npass := npass + 1;
   else rep := rep || E'\nFAIL  F4b: hit=' || b.hit || ' spared=' || b.spared || ' ' || r::text; nfail := nfail + 1; end if;
 
-  -- F5: revenue grid EXCLUDES rained lessons and reports the impact
+  -- F5: the impact summary counts BOTH fixture rain-outs (F1's single +
+  -- the bulk's booked one — both land on the test day). Real production
+  -- bookings may add to cells/rained, so assert with >= here and prove
+  -- exact exclusion via the F5b delta after the undo below.
   r := public.get_revenue_grid((v_day)::timestamp at time zone 'America/Chicago',
                                (v_day + 1)::timestamp at time zone 'America/Chicago');
-  if json_array_length(r->'cells') = 0
-     and (r->'rained'->>'lessons')::int = 1
-     and (r->'rained'->>'revenue')::numeric = 50 then
-    rep := rep || E'\nPASS  F5: grid excludes rained lessons; impact = 1 lesson / $50 not realized'; npass := npass + 1;
+  select coalesce(sum((c->>'revenue')::numeric), 0) into v from json_array_elements(r->'cells') c;
+  v2 := (r->'rained'->>'revenue')::numeric;
+  if (r->'rained'->>'lessons')::int >= 2 and v2 >= 100 then
+    rep := rep || E'\nPASS  F5: impact summary counts the rained fixtures (' || (r->'rained'->>'lessons') || ' lessons / $' || v2 || ' not realized; $' || v || ' realized cells)'; npass := npass + 1;
   else rep := rep || E'\nFAIL  F5: ' || r::text; nfail := nfail + 1; end if;
 
   -- F6: no rained booking anywhere carries cancelled_at
@@ -533,6 +538,16 @@ begin
   if b.sstat = 'booked' and b.bstat = 'confirmed' and b.booked_by_display = 'Kid F.' and b.rained_out_at is null then
     rep := rep || E'\nPASS  F7: undo restored the booking intact (status, display, audit cleared)'; npass := npass + 1;
   else rep := rep || E'\nFAIL  F7: ' || coalesce(b.sstat, 'null') || '/' || coalesce(b.bstat, 'null'); nfail := nfail + 1; end if;
+
+  -- F5b: EXACT exclusion proof — undoing one $50 rain-out moves exactly
+  -- $50 from "not realized" into the grid cells, independent of any real
+  -- bookings in the window (the transaction snapshot is stable).
+  r := public.get_revenue_grid((v_day)::timestamp at time zone 'America/Chicago',
+                               (v_day + 1)::timestamp at time zone 'America/Chicago');
+  select coalesce(sum((c->>'revenue')::numeric), 0) into v3 from json_array_elements(r->'cells') c;
+  if v3 = v + 50 and (r->'rained'->>'revenue')::numeric = v2 - 50 then
+    rep := rep || E'\nPASS  F5b: undo moved exactly $50 rained → realized (grid excludes rained lessons precisely)'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  F5b: cells $' || v || '→$' || v3 || ', rained $' || v2 || '→$' || (r->'rained'->>'revenue'); nfail := nfail + 1; end if;
   begin
     r := public.undo_rain_out('44444444-4444-4444-4444-4444444444f6');
     rep := rep || E'\nFAIL  F7b: undid a PAST rain-out'; nfail := nfail + 1;
