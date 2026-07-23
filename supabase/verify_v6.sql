@@ -452,7 +452,10 @@ begin
     ('44444444-4444-4444-4444-4444444444f3', v_pool2, v_coach, (v_day + time '12:00') at time zone 'America/Chicago', 60, 50, 'open',   v_coach),
     ('44444444-4444-4444-4444-4444444444f4', v_pool,  v_coach, (v_day + 1 + time '10:00') at time zone 'America/Chicago', 60, 50, 'open', v_coach),
     ('44444444-4444-4444-4444-4444444444f5', v_pool,  v_coach, (v_day + time '15:00') at time zone 'America/Chicago', 60, 50, 'booked', v_coach),
-    ('44444444-4444-4444-4444-4444444444f6', v_pool,  v_coach, now() - interval '3 days', 60, 50, 'rained_out', v_coach);
+    ('44444444-4444-4444-4444-4444444444f6', v_pool,  v_coach, now() - interval '3 days', 60, 50, 'rained_out', v_coach),
+    -- v10 window fixtures: morning + afternoon on the same later day
+    ('44444444-4444-4444-4444-4444444444f7', v_pool,  v_coach, (v_day + 2 + time '09:00') at time zone 'America/Chicago', 60, 50, 'open', v_coach),
+    ('44444444-4444-4444-4444-4444444444f8', v_pool,  v_coach, (v_day + 2 + time '15:00') at time zone 'America/Chicago', 60, 50, 'open', v_coach);
   insert into public.bookings (slot_id, student_name, first_name, last_name, email, phone) values
     ('44444444-4444-4444-4444-4444444444f2', 'Kid Fixture', 'Kid', 'Fixture', 'vtest-f@example.com', '2045550003'),
     ('44444444-4444-4444-4444-4444444444f5', 'Kid Fixture', 'Kid', 'Fixture', 'vtest-f@example.com', '2045550003');
@@ -511,6 +514,21 @@ begin
   if b.hit = 2 and b.spared = 2 and json_array_length((r->'booking_ids')::json) = 1 then
     rep := rep || E'\nPASS  F4b: bulk marked exactly the matching slots (other pool + other day untouched), 1 booking id returned'; npass := npass + 1;
   else rep := rep || E'\nFAIL  F4b: hit=' || b.hit || ' spared=' || b.spared || ' ' || r::text; nfail := nfail + 1; end if;
+
+  -- F4c (v10): a TIME WINDOW rains out only the matching lessons — the
+  -- morning 9:00 slot survives an afternoon-only (noon onward) rain-out.
+  r := public.rain_out_day(v_day + 2, null, false, 'America/Chicago', '12:00', null);
+  if (select status from public.slots where id = '44444444-4444-4444-4444-4444444444f8') = 'rained_out'
+     and (select status from public.slots where id = '44444444-4444-4444-4444-4444444444f7') = 'open' then
+    rep := rep || E'\nPASS  F4c: afternoon-only window rained the 3 PM slot, spared the 9 AM one'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  F4c: window not respected: ' || r::text; nfail := nfail + 1; end if;
+  begin
+    r := public.rain_out_day(v_day + 2, null, false, 'America/Chicago', '17:00', '12:00');
+    rep := rep || E'\nFAIL  F4d: accepted from >= until'; nfail := nfail + 1;
+  exception when others then
+    if sqlerrm like '%must be before%' then rep := rep || E'\nPASS  F4d: inverted time window rejected'; npass := npass + 1;
+    else rep := rep || E'\nFAIL  F4d: unexpected: ' || sqlerrm; nfail := nfail + 1; end if;
+  end;
 
   -- F5: the impact summary counts BOTH fixture rain-outs (F1's single +
   -- the bulk's booked one — both land on the test day). Real production

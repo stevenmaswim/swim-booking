@@ -311,10 +311,14 @@
   <!-- Rain out day modal (admins) -->
   <div class="modal-backdrop" id="rainModal">
     <div class="modal" role="dialog" aria-modal="true" aria-label="Rain out a day">
-      <h3>Rain out a day</h3>
-      <p class="muted">Marks every open and booked lesson that day as rained out and emails the affected clients. Rain-outs never count against a client and are excluded from revenue.</p>
+      <h3>Rain out a day (or part of it)</h3>
+      <p class="muted">Marks every open and booked lesson in the chosen window as rained out and emails the affected clients. Leave the times blank for the whole day. Rain-outs never count against a client and are excluded from revenue.</p>
       <label for="rnDate">Date</label>
       <input type="date" id="rnDate">
+      <div class="row">
+        <div><label for="rnFrom">From (optional)</label><input type="time" id="rnFrom"></div>
+        <div><label for="rnTo">Until (optional)</label><input type="time" id="rnTo"></div>
+      </div>
       <label for="rnPool">Pool</label>
       <select id="rnPool"><option value="">All pools</option></select>
       <div class="msg" id="rnMsg"></div>
@@ -754,6 +758,8 @@
     document.getElementById('rainDayBtn').onclick = () => {
       rnPreview = null;
       document.getElementById('rnDate').value = ymd(new Date());
+      document.getElementById('rnFrom').value = '';
+      document.getElementById('rnTo').value = '';
       const ps = document.getElementById('rnPool');
       ps.innerHTML = '<option value="">All pools</option>';
       pools.filter(p => p.active).forEach(p =>
@@ -764,7 +770,7 @@
     };
     document.getElementById('rnCancel').onclick = () =>
       document.getElementById('rainModal').classList.remove('show');
-    ['rnDate', 'rnPool'].forEach(id => document.getElementById(id).addEventListener('change', () => {
+    ['rnDate', 'rnPool', 'rnFrom', 'rnTo'].forEach(id => document.getElementById(id).addEventListener('change', () => {
       rnPreview = null;
       document.getElementById('rnGo').textContent = 'Check impact';
     }));
@@ -772,7 +778,13 @@
       const btn = document.getElementById('rnGo');
       const day = document.getElementById('rnDate').value;
       if (!day) { showMsg('rnMsg', 'Pick a date.', 'error'); return; }
-      const args = { p_day: day, p_pool_id: document.getElementById('rnPool').value || null, p_tz: BUSINESS_TIMEZONE };
+      const args = {
+        p_day: day,
+        p_pool_id: document.getElementById('rnPool').value || null,
+        p_from_time: document.getElementById('rnFrom').value || null,
+        p_to_time: document.getElementById('rnTo').value || null,
+        p_tz: BUSINESS_TIMEZONE
+      };
       btn.disabled = true;
       if (!rnPreview) {
         const { data, error } = await db.rpc('rain_out_day', { ...args, p_dry_run: true });

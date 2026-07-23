@@ -211,6 +211,22 @@ check("staff dash: rain_out_day called dry-run first, then for real, with the tz
   rainCalls.length === 2 && rainCalls[0].args.p_dry_run === true &&
   rainCalls[1].args.p_dry_run === false && rainCalls[1].args.p_tz === "America/Chicago",
   JSON.stringify(rainCalls.map((c) => c.args)));
+check("staff dash: whole-day bulk sends null time window",
+  rainCalls[1].args.p_from_time === null && rainCalls[1].args.p_to_time === null);
+
+// v10: a PARTIAL day — set "From 12:00" and dry-run again
+await page.click("#rainDayBtn");
+await page.waitForSelector("#rainModal.show");
+await page.evaluate(() => { document.getElementById("rnFrom").value = "12:00"; });
+await page.click("#rnGo");
+await page.waitForFunction(() =>
+  window.__rpcCalls.filter((c) => c.name === "rain_out_day").length >= 3);
+check("staff dash: afternoon-only window passes p_from_time to the RPC",
+  await page.evaluate(() => {
+    const c = window.__rpcCalls.filter((x) => x.name === "rain_out_day").pop();
+    return c.args.p_from_time === "12:00" && c.args.p_to_time === null && c.args.p_dry_run === true;
+  }));
+await page.click("#rnCancel");
 check("staff dash: ONE rain_out email invoke carrying all booking ids (dedupe server-side)",
   await page.evaluate(() => {
     const inv = window.__invokes.filter((i) => i.body && i.body.type === "rain_out");
