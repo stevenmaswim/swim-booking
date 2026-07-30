@@ -135,7 +135,7 @@
     <div id="tab-bookings" style="display:none;">
       <div class="card">
         <h3>Recently Cancelled</h3>
-        <p class="muted">Client cancellations from the last 14 days — these slots may be free to refill. Staff cancellations and weather rain-outs are not listed here.</p>
+        <p class="muted">Cancellations from the last 14 days — these slots may be free to refill. Rows from before cancellation tracking existed are marked <em>origin unknown</em>. Staff-cancelled slots and weather rain-outs are not listed.</p>
         <div class="row" style="align-items:flex-end; margin-top:10px;">
           <div><label for="cxCoach">Coach</label>
             <select id="cxCoach"><option value="">All coaches</option></select></div>
@@ -1037,7 +1037,8 @@
     }
     function cxUnreadCount() {
       const seen = cxSeenAt();
-      return cxRows.filter(r => new Date(r.cancelled_at).getTime() > seen).length;
+      return cxRows.filter(r =>
+        r.cancelled_by === 'client' && new Date(r.cancelled_at).getTime() > seen).length;
     }
     function renderCxBadge() {
       const el = document.getElementById('cxBadge');
@@ -1086,9 +1087,10 @@
       const seen = cxSeenAt();
       el.innerHTML = '<table><tr><th>Cancelled</th><th>Client</th><th>Lesson</th><th>Coach</th><th>Notice</th><th>Slot now</th><th></th></tr>' +
         cxRows.map(r => {
-          const isNew = new Date(r.cancelled_at).getTime() > seen;
+          const isNew = r.cancelled_by === 'client' && new Date(r.cancelled_at).getTime() > seen;
           return `<tr>
-            <td>${fmtDT(new Date(r.cancelled_at))}${isNew ? ' <span class="badge booked">new</span>' : ''}</td>
+            <td>${fmtDT(new Date(r.cancelled_at))}${isNew ? ' <span class="badge booked">new</span>' : ''}
+              ${r.cancelled_by === 'client' ? '' : '<br><span class="muted" title="Cancelled before the system recorded who cancelled — it may have been the client or staff.">origin unknown</span>'}</td>
             <td><strong>${esc(r.student_name || r.first_name || '')}</strong><br>
               <span class="muted">${esc(r.email || '')}${r.phone ? ' · ' + esc(r.phone) : ''}</span></td>
             <td>${fmtDT(new Date(r.starts_at))} (${r.duration_min}m)<br>

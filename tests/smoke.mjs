@@ -288,14 +288,18 @@ await page.evaluate(() => {
   // cancellations, so staff-cancelled and rained-out rows simply aren't here.
   window.__rpcHandlers.get_recent_cancellations = (args) => {
     const rows = [
-      { id: "cx1", cancelled_at: ago(1), student_name: "Emma Lee", first_name: "Emma",
+      { id: "cx1", cancelled_at: ago(1), cancelled_by: "client", student_name: "Emma Lee", first_name: "Emma",
         email: "emma@x.com", phone: "204-555-1111", slot_id: "sl-open", starts_at: soon(30),
         duration_min: 60, slot_status: "open", coach_id: "co1", pool_name: "Canyon Creek",
         coach: "Coach B", seconds_before: 30 * 3600 },
-      { id: "cx2", cancelled_at: ago(50), student_name: "Liam Ray", first_name: "Liam",
+      { id: "cx2", cancelled_at: ago(50), cancelled_by: "client", student_name: "Liam Ray", first_name: "Liam",
         email: "liam@x.com", phone: null, slot_id: "sl-rebooked", starts_at: soon(80),
         duration_min: 60, slot_status: "booked", coach_id: "co1", pool_name: "Main Pool",
         coach: "Coach B", seconds_before: 5 * 3600 },
+      { id: "cx3", cancelled_at: ago(2), cancelled_by: null, student_name: "Legacy Kid", first_name: "Legacy",
+        email: "legacy@x.com", phone: null, slot_id: "sl-legacy", starts_at: soon(60),
+        duration_min: 60, slot_status: "open", coach_id: "co1", pool_name: "Main Pool",
+        coach: "Coach B", seconds_before: 60 * 3600 },
     ];
     return { data: { cancellations: args.p_only_open ? rows.filter((r) => r.slot_status === "open") : rows }, error: null };
   };
@@ -324,12 +328,15 @@ check("cx: only-open filter hides rebooked slots",
 // unread badge: coach's seen_at is null → both rows unread; viewing clears it
 await page.evaluate(() => { document.getElementById("cxOnlyOpen").checked = false; document.getElementById("cxOnlyOpen").onchange(); });
 await page.waitForFunction(() => document.querySelectorAll("#cxList tr").length > 2);
+check("cx: pre-tracking rows are shown but labelled origin unknown",
+  (await page.$eval("#cxList", (e) => e.innerHTML)).includes("Legacy") &&
+  (await page.$eval("#cxList", (e) => e.innerHTML)).includes("origin unknown"));
 check("cx: unread badge counts cancellations newer than last-viewed",
   await page.evaluate(() => {
     myProfile.cancellations_seen_at = new Date(Date.now() - 2 * 3600e3).toISOString();
     renderCxBadge();
     const el = document.getElementById("cxBadge");
-    return el.style.display !== "none" && el.textContent === "1 new";
+    return el.style.display !== "none" && el.textContent === "1 new";   // legacy row excluded
   }));
 check("cx: viewing the panel clears the badge and stamps the profile server-side",
   await page.evaluate(async () => {
