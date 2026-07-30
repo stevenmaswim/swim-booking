@@ -56,7 +56,8 @@ Supabase Storage via the staff dashboard, same as before.
 | `supabase/migration_v7.sql` | Revenue grid cells gain a per-coach breakdown |
 | `supabase/migration_v8.sql` | Per-student overlap rule: one email can book different kids into simultaneous lessons |
 | `supabase/migration_v9.sql` | Rain-out tracking: weather closures distinct from cancellations, excluded from revenue |
-| `supabase/migration_v10.sql` | Bulk rain-out gains an optional time window (morning-only storms) (run last) |
+| `supabase/migration_v10.sql` | Bulk rain-out gains an optional time window (morning-only storms) |
+| `supabase/migration_v11.sql` | Recently Cancelled panel + coach alerts when clients cancel (run last) |
 | `supabase/verify_v6.sql` | Post-migration test suite for the SQL Editor — reports PASS/FAIL in a deliberate final "error", rolls everything back |
 | `supabase/verify_v6_api.mjs` | Permission checks against the live REST API with real staff JWTs |
 | `supabase/functions/emails/` | Edge Function that sends confirmation, reminder, and login-code emails via Resend |
@@ -212,7 +213,7 @@ Before sharing the booking link with real families. (Full audit: `PRELAUNCH_AUDI
 1. **Migrations** — in the SQL Editor, run in order: `schema.sql` →
    `migration_google_auth.sql` → `migration_clients_revenue.sql` → `migration_v3.sql`
    → `migration_v4.sql` → `migration_security.sql` → `migration_v5.sql` →
-   `migration_v6.sql` → `migration_v7.sql` → `migration_v8.sql` → `migration_v9.sql` → `migration_v10.sql`. (Idempotent from v5 on — safe to re-run.)
+   `migration_v6.sql` → `migration_v7.sql` → `migration_v8.sql` → `migration_v9.sql` → `migration_v10.sql` → `migration_v11.sql`. (Idempotent from v5 on — safe to re-run.)
 2. **Edge Function secrets** — `supabase secrets set … RESEND_API_KEY / FROM_EMAIL /
    SITE_URL / BUSINESS_TIMEZONE / CRON_SECRET` (§3b).
 3. **Deploy the Edge Function** — `supabase functions deploy emails --no-verify-jwt`
@@ -288,6 +289,7 @@ Every week: staff open **Publish Slots**, enter that week's times per pool, done
 - **Reopen (admins)**: cancelled *future* slots get a Reopen button in the History tab.
 - **Revenue tab (admins)** starts with the hour-of-day × day-of-week grid (like the paper sheet) with row/column/grand totals and its own CSV export; hovering (or tapping) a cell shows each coach's share of it. The by-week/coach/pool summaries are below.
 - **Calendar** shows each coach's booked/open hours for the displayed week under the pool legend (e.g. "Kevin Li: 6.5h booked · 2h open") — schedule data, visible to all staff.
+- **Recently Cancelled** (top of the Bookings tab) lists client cancellations from the last 14 days with the slot's current state — "Reopened & still available", "Rebooked by someone else", "Slot was removed" — filterable by coach and by still-open, with a "N new" badge since you last looked. Staff cancellations and weather rain-outs are deliberately excluded. When a client cancels, the slot's coach gets an email (one per coach even if several lessons go at once); toggle it per coach under **My Profile**, and admins get a matching toggle for unassigned slots.
 - **Coaches** publish/edit/cancel only their own slots; admins do all of this for anyone, including creating slots assigned to any coach.
 
 ## Ideas for later

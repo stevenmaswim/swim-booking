@@ -266,6 +266,135 @@ async function handleSlotUpdate(body: { booking_id?: string; old_start?: string;
   return json({ ok: true });
 }
 
+// ---------- Cancellation alert (CLIENT cancellations only → staff) ----------
+// Fired by the client's browser right after cancel_booking succeeds. Safe to
+// expose: every field is re-derived from the DB and the handler refuses
+// anything that is not a client cancellation, so it cannot be used to email
+// staff arbitrary content — or to fake a staff cancellation into an alert.
+//
+// Batching: a client cancelling three lessons fires three invocations. Each
+// one claims every not-yet-alerted sibling cancellation (same email, last 10
+// minutes) by stamping cancel_alert_sent_at in a single conditional UPDATE.
+// The first invocation claims them all and sends ONE email per coach; the
+// others claim nothing and send nothing.
+const ALERT_BATCH_MINUTES = 10;
+
+async function staffEmail(userId: string): Promise<string | null> {
+  const { data, error } = await sb.auth.admin.getUserById(userId);
+  if (error || !data?.user?.email) return null;
+  return data.user.email;
+}
+
+function howFarBefore(startsAt: string, cancelledAt: string): string {
+  const ms = new Date(startsAt).getTime() - new Date(cancelledAt).getTime();
+  if (ms < 0) return "after the lesson had started";
+  const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000);
+  if (h >= 48) return `${Math.floor(h / 24)} days before`;
+  if (h >= 1) return `${h}h ${m}m before`;
+  return `${m}m before`;
+}
+
+async function handleCancellationAlert(body: { booking_id?: string }) {
+  const id = String(body.booking_id ?? "");
+  if (!id) return json({ error: "booking_id required" }, 400);
+
+  // Gate: only a genuine, client-initiated cancellation gets an alert.
+  const { data: seed } = await sb.from("bookings")
+    .select("id, email, status, cancelled_by")
+    .eq("id", id).maybeSingle();
+  if (!seed || (seed as any).status !== "cancelled" || (seed as any).cancelled_by !== "client") {
+    return json({ ok: true, sent: 0, skipped: "not a client cancellation" });
+  }
+
+  // All of this client's un-alerted cancellations in the batch window.
+  const since = new Date(Date.now() - ALERT_BATCH_MINUTES * 60000).toISOString();
+  const { data: siblings } = await sb.from("bookings")
+    .select("id, first_name, last_name, student_name, email, phone, cancelled_at, slots(id, starts_at, duration_min, status, coach_id, pools(name))")
+    .eq("email", (seed as any).email)
+    .eq("status", "cancelled")
+    .eq("cancelled_by", "client")
+    .is("cancel_alert_sent_at", null)
+    .gte("cancelled_at", since);
+  if (!siblings?.length) return json({ ok: true, sent: 0 });
+
+  // Group by the slot's coach (null coach = admins' pile).
+  const groups = new Map<string, any[]>();
+  for (const b of siblings as any[]) {
+    const key = b.slots?.coach_id ?? "__unassigned__";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(b);
+  }
+
+  let sent = 0;
+  for (const [coachKey, rows] of groups) {
+    // Claim first: whatever this call stamps is what it is responsible for.
+    const ids = rows.map((r) => r.id);
+    const { data: claimed } = await sb.from("bookings")
+      .update({ cancel_alert_sent_at: new Date().toISOString() })
+      .in("id", ids).is("cancel_alert_sent_at", null)
+      .select("id");
+    const claimedIds = new Set((claimed ?? []).map((c: any) => c.id));
+    const mine = rows.filter((r) => claimedIds.has(r.id));
+    if (!mine.length) continue;   // another invocation got there first
+
+    // Recipients: the assigned coach, or every opted-in admin if unassigned.
+    const recipients: string[] = [];
+    if (coachKey === "__unassigned__") {
+      const { data: admins } = await sb.from("profiles")
+        .select("id").eq("role", "admin").eq("notify_unassigned_cancellations", true);
+      for (const a of (admins ?? []) as any[]) {
+        const e = await staffEmail(a.id);
+        if (e) recipients.push(e);
+      }
+    } else {
+      const { data: prof } = await sb.from("profiles")
+        .select("id, notify_cancellations").eq("id", coachKey).maybeSingle();
+      if (prof && (prof as any).notify_cancellations) {
+        const e = await staffEmail(coachKey);
+        if (e) recipients.push(e);
+      }
+    }
+    if (!recipients.length) continue;   // nobody opted in — silence is correct
+
+    mine.sort((a, b) => String(a.slots.starts_at).localeCompare(String(b.slots.starts_at)));
+    const who = `${mine[0].first_name ?? ""} ${(mine[0].last_name ?? "").charAt(0)}.`.trim();
+    const n = mine.length;
+    const first = mine[0];
+    const subject = n === 1
+      ? `Slot reopened: ${fmtWhen(first.slots.starts_at)} at ${first.slots.pools?.name ?? "the pool"} (cancelled by ${who})`
+      : `${n} slots reopened (cancelled by ${who})`;
+
+    const lines = mine.map((b: any) => {
+      const reopened = b.slots?.status === "open";
+      return `<li style="margin-bottom:8px;">
+        <strong>${esc(fmtWhen(b.slots.starts_at))}</strong> · ${b.slots.duration_min} min ·
+        ${esc(b.slots.pools?.name ?? "")}<br>
+        <span style="color:#64748b;">Cancelled ${esc(howFarBefore(b.slots.starts_at, b.cancelled_at))} —
+        ${reopened ? "the slot is open for rebooking" : "the slot is no longer open"}</span>
+      </li>`;
+    }).join("");
+
+    for (const to of recipients) {
+      try {
+        await sendEmail(to, subject, shell(`
+          <p><strong>${esc(who)}</strong> cancelled ${n === 1 ? "a lesson" : `${n} lessons`}:</p>
+          <ul style="padding-left:18px;">${lines}</ul>
+          <p style="color:#64748b;font-size:0.9rem;">Student: ${esc(first.student_name ?? "")} ·
+          ${esc(first.email ?? "")}${first.phone ? " · " + esc(first.phone) : ""}</p>
+          <p style="margin-top:14px;">
+            <a href="${SITE_URL}/staff.html" style="background:#0369a1;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;">Open the dashboard</a>
+          </p>
+          <p style="color:#94a3b8;font-size:0.8rem;margin-top:12px;">You can turn these off under My Profile in the staff dashboard.</p>
+        `));
+        sent++;
+      } catch (e) {
+        console.error("cancellation alert failed for", to, e);
+      }
+    }
+  }
+  return json({ ok: true, sent });
+}
+
 // ---------- Reminders (cron only) ----------
 async function handleReminders(req: Request) {
   if (!CRON_SECRET || req.headers.get("x-cron-secret") !== CRON_SECRET) {
@@ -311,6 +440,7 @@ Deno.serve(async (req) => {
       case "confirmation": return await handleConfirmation(body);
       case "slot_update": return await handleSlotUpdate(body);
       case "rain_out": return await handleRainOut(body);
+      case "cancellation_alert": return await handleCancellationAlert(body);
       case "reminders": return await handleReminders(req);
       default: return json({ error: "unknown type" }, 400);
     }

@@ -14,6 +14,9 @@
     .badge.late  { background: #fef3c7; color: #92400e; }
     .badge.late3 { background: #fee2e2; color: #991b1b; }
     .cxl-when { font-size: 0.875rem; margin-top: 2px; white-space: nowrap; }
+    .tab-badge { display: inline-block; background: #dc2626; color: #fff; border-radius: 999px;
+      padding: 1px 8px; font-size: 0.75rem; font-weight: 800; margin-left: 4px; vertical-align: middle; }
+    .cx-open { color: #065f46; font-weight: 700; }
     /* Calendar blocks stay readable when lanes get narrow: the time is
        always visible; pool text truncates. Full details in title + modal. */
     .cal-block .cb-line { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -72,7 +75,7 @@
     <div class="tabs">
       <button data-tab="calendar" class="active">Calendar</button>
       <button data-tab="slots">Publish Slots</button>
-      <button data-tab="bookings">Bookings</button>
+      <button data-tab="bookings">Bookings <span id="cxBadge" class="tab-badge" style="display:none;"></span></button>
       <button data-tab="history">History</button>
       <button data-tab="clients">Clients</button>
       <button data-tab="pools">Pools</button>
@@ -130,6 +133,22 @@
 
     <!-- Bookings tab -->
     <div id="tab-bookings" style="display:none;">
+      <div class="card">
+        <h3>Recently Cancelled</h3>
+        <p class="muted">Client cancellations from the last 14 days — these slots may be free to refill. Staff cancellations and weather rain-outs are not listed here.</p>
+        <div class="row" style="align-items:flex-end; margin-top:10px;">
+          <div><label for="cxCoach">Coach</label>
+            <select id="cxCoach"><option value="">All coaches</option></select></div>
+          <div style="flex:0 0 auto; align-self:center;">
+            <label style="display:flex; align-items:center; gap:8px; margin:0;">
+              <input type="checkbox" id="cxOnlyOpen" style="width:auto; min-height:auto;">
+              Only slots still open
+            </label>
+          </div>
+        </div>
+        <div class="msg" id="cxMsg"></div>
+        <div style="overflow-x:auto;"><div id="cxList"><p class="empty">Loading&hellip;</p></div></div>
+      </div>
       <div class="card">
         <h3>Upcoming bookings</h3>
         <div class="msg" id="bookingsMsg"></div>
@@ -298,6 +317,12 @@
           <textarea id="meBio" rows="4" placeholder="A couple of sentences about you"></textarea>
           <label style="display:flex; align-items:center; gap:8px; margin-top:12px;">
             <input type="checkbox" id="mePublic" style="width:auto;"> Show me on the public site
+          </label>
+          <label style="display:flex; align-items:center; gap:8px; margin-top:10px;">
+            <input type="checkbox" id="meNotifyCx" style="width:auto;"> Email me when my lessons are cancelled
+          </label>
+          <label id="meNotifyUnassignedWrap" style="display:none; align-items:center; gap:8px; margin-top:10px;">
+            <input type="checkbox" id="meNotifyUnassigned" style="width:auto;"> Email me about cancellations on unassigned slots (admins)
           </label>
           <div class="msg" id="meMsg"></div>
           <button class="btn" style="margin-top:14px;">Save profile</button>
@@ -529,7 +554,7 @@
       if (!myProfile) await createMissingProfile();
       document.getElementById('whoami').textContent = myProfile ? myProfile.display_name : user.email;
       renderCalendar();
-      loadSlotAdmin(); loadBookings(); loadClients(); loadPoolAdmin(); fillProfileForm();
+      loadSlotAdmin(); loadBookings(); loadCancellations(); loadClients(); loadPoolAdmin(); fillProfileForm();
     }
     // A staff member allowlisted *after* their first sign-in has no
     // auto-created profile — create it here from the Google display name.
@@ -595,6 +620,7 @@
       b.classList.add('active');
       ['calendar','slots','bookings','history','clients','pools','me','team','revenue'].forEach(t =>
         document.getElementById('tab-' + t).style.display = (t === b.dataset.tab) ? 'block' : 'none');
+      if (b.dataset.tab === 'bookings') loadCancellations().then(markCancellationsSeen);
       if (b.dataset.tab === 'revenue') { loadRevenue(); loadRevenueGrid(); }
       if (b.dataset.tab === 'history') initHistory();
       if (b.dataset.tab === 'team') renderTeam();
@@ -1000,6 +1026,98 @@
       });
     }
 
+    // ================= Recently Cancelled (client cancellations) =================
+    // Source: get_recent_cancellations() — server-side filtered to
+    // cancelled_by='client', so staff cancellations and rain-outs never
+    // appear here. All staff may view it (a cancellation = a refillable slot).
+    let cxRows = [], cxFilled = false;
+    function cxSeenAt() {
+      return myProfile && myProfile.cancellations_seen_at
+        ? new Date(myProfile.cancellations_seen_at).getTime() : 0;
+    }
+    function cxUnreadCount() {
+      const seen = cxSeenAt();
+      return cxRows.filter(r => new Date(r.cancelled_at).getTime() > seen).length;
+    }
+    function renderCxBadge() {
+      const el = document.getElementById('cxBadge');
+      const n = cxUnreadCount();
+      el.textContent = n ? `${n} new` : '';
+      el.style.display = n ? '' : 'none';
+    }
+    async function loadCancellations() {
+      if (!cxFilled) {   // fill the coach filter once
+        const cs = document.getElementById('cxCoach');
+        coaches.forEach(c => cs.insertAdjacentHTML('beforeend',
+          `<option value="${c.id}">${esc(c.display_name)}</option>`));
+        cxFilled = true;
+      }
+      const { data, error } = await db.rpc('get_recent_cancellations', {
+        p_days: 14,
+        p_coach_id: document.getElementById('cxCoach').value || null,
+        p_only_open: document.getElementById('cxOnlyOpen').checked
+      });
+      const el = document.getElementById('cxList');
+      if (error) { el.innerHTML = ''; showMsg('cxMsg', 'Could not load cancellations: ' + error.message, 'error'); return; }
+      cxRows = (data && data.cancellations) || [];
+      renderCancellations(); renderCxBadge();
+    }
+    // What happened to the slot AFTER the client let it go.
+    function cxSlotState(r) {
+      if (r.slot_status === 'open') return '<span class="cx-open">Reopened &amp; still available</span>';
+      if (r.slot_status === 'booked') return '<span class="muted">Rebooked by someone else</span>';
+      if (r.slot_status === 'rained_out') return '<span class="badge rained">rained out</span>';
+      return '<span class="muted">Slot was removed</span>';
+    }
+    function cxLead(r) {
+      if (r.seconds_before == null) return '<span class="muted">after the lesson started</span>';
+      const h = Math.floor(r.seconds_before / 3600);
+      const label = h >= 48 ? `${Math.floor(h / 24)} days before`
+        : h >= 1 ? `${h}h before`
+        : `${Math.max(1, Math.round(r.seconds_before / 60))}m before`;
+      // <24h reuses the late-cancel badge; anything longer is neutral text.
+      return r.seconds_before < 86400
+        ? `<span class="badge late">Cancelled &lt;24h — ${label}</span>`
+        : `<span class="muted">${label}</span>`;
+    }
+    function renderCancellations() {
+      const el = document.getElementById('cxList');
+      if (!cxRows.length) { el.innerHTML = '<p class="empty">No client cancellations in the last 14 days.</p>'; return; }
+      const seen = cxSeenAt();
+      el.innerHTML = '<table><tr><th>Cancelled</th><th>Client</th><th>Lesson</th><th>Coach</th><th>Notice</th><th>Slot now</th><th></th></tr>' +
+        cxRows.map(r => {
+          const isNew = new Date(r.cancelled_at).getTime() > seen;
+          return `<tr>
+            <td>${fmtDT(new Date(r.cancelled_at))}${isNew ? ' <span class="badge booked">new</span>' : ''}</td>
+            <td><strong>${esc(r.student_name || r.first_name || '')}</strong><br>
+              <span class="muted">${esc(r.email || '')}${r.phone ? ' · ' + esc(r.phone) : ''}</span></td>
+            <td>${fmtDT(new Date(r.starts_at))} (${r.duration_min}m)<br>
+              <span class="muted">${esc(r.pool_name || '')}</span></td>
+            <td>${esc(r.coach)}</td>
+            <td>${cxLead(r)}</td>
+            <td>${cxSlotState(r)}</td>
+            <td>${r.slot_status === 'open' ? `<button class="btn small secondary" data-cxjump="${r.starts_at}">View in calendar</button>` : ''}</td>
+          </tr>`;
+        }).join('') + '</table>';
+      el.querySelectorAll('[data-cxjump]').forEach(b => b.onclick = () => {
+        calStart = startOfWeek(new Date(b.dataset.cxjump));
+        document.querySelector('[data-tab="calendar"]').click();
+        renderCalendar();
+      });
+    }
+    // Viewing the tab clears the unread badge (stamped server-side so the
+    // count follows this staff member across devices).
+    async function markCancellationsSeen() {
+      const now = new Date().toISOString();
+      const { error } = await db.from('profiles')
+        .update({ cancellations_seen_at: now }).eq('id', me.id);
+      if (error) return;
+      if (myProfile) myProfile.cancellations_seen_at = now;
+      renderCxBadge();
+    }
+    document.getElementById('cxCoach').onchange = loadCancellations;
+    document.getElementById('cxOnlyOpen').onchange = loadCancellations;
+
     // ================= Clients (CRM) =================
     async function loadClients() {
       const [cRes, bRes] = await Promise.all([
@@ -1299,13 +1417,18 @@
       document.getElementById('meName').value = myProfile.display_name;
       document.getElementById('meBio').value = myProfile.bio;
       document.getElementById('mePublic').checked = myProfile.is_public;
+      document.getElementById('meNotifyCx').checked = myProfile.notify_cancellations !== false;
+      document.getElementById('meNotifyUnassigned').checked = myProfile.notify_unassigned_cancellations !== false;
+      document.getElementById('meNotifyUnassignedWrap').style.display = isAdmin ? 'flex' : 'none';
     }
     document.getElementById('meForm').onsubmit = async (e) => {
       e.preventDefault();
       const { error } = await db.from('profiles').update({
         display_name: document.getElementById('meName').value,
         bio: document.getElementById('meBio').value,
-        is_public: document.getElementById('mePublic').checked
+        is_public: document.getElementById('mePublic').checked,
+        notify_cancellations: document.getElementById('meNotifyCx').checked,
+        notify_unassigned_cancellations: document.getElementById('meNotifyUnassigned').checked
       }).eq('id', me.id);
       if (error) { showMsg('meMsg', error.message, 'error'); return; }
       showMsg('meMsg', 'Profile saved.', 'success');

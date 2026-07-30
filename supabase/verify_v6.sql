@@ -586,6 +586,107 @@ begin
   end;
   execute 'reset role';
 
+  -- ==================== G. Recently Cancelled + alerts (v11) ====================
+  -- G1: a CLIENT cancellation (anon, via cancel_booking) is tagged 'client'
+  -- and its slot reopens.
+  insert into public.slots (id, pool_id, coach_id, starts_at, duration_min, price, status, created_by)
+  values ('44444444-4444-4444-4444-4444444444c1', v_pool, v_coach, now() + interval '40 hours', 60, 50, 'booked', v_coach);
+  insert into public.bookings (slot_id, student_name, first_name, last_name, email, phone)
+  values ('44444444-4444-4444-4444-4444444444c1', 'Cx Kid', 'Cx', 'Kid', 'vtest-cx@example.com', '2045550004')
+  returning cancel_token into tok;
+
+  perform set_config('request.jwt.claims', '{"role":"anon"}', true);   -- the client
+  r := public.cancel_booking(tok::uuid);
+  select bo.cancelled_by as cby, bo.cancelled_at as cat, bo.cancel_alert_sent_at as sent, s2.status as sstat
+  into b
+  from public.bookings bo join public.slots s2 on s2.id = bo.slot_id
+  where bo.slot_id = '44444444-4444-4444-4444-4444444444c1';
+  if b.cby = 'client' and b.cat is not null and b.sstat = 'open' then
+    rep := rep || E'\nPASS  G1: client cancel tagged cancelled_by=client, slot reopened'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  G1: by=' || coalesce(b.cby, 'null') || ' slot=' || coalesce(b.sstat, 'null'); nfail := nfail + 1; end if;
+  if (r->>'booking_id') is not null then
+    rep := rep || E'\nPASS  G1b: cancel_booking returns booking_id (needed to fire the alert)'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  G1b: no booking_id in ' || r::text; nfail := nfail + 1; end if;
+  if b.sent is null then
+    rep := rep || E'\nPASS  G1c: alert not yet claimed (the Edge Function stamps it)'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  G1c: cancel_alert_sent_at pre-set'; nfail := nfail + 1; end if;
+
+  -- G2: a STAFF cancellation is tagged 'staff' — never alerted, never listed
+  perform set_config('request.jwt.claims',
+    '{"sub":"22222222-2222-2222-2222-222222222222","email":"vtest-coach@example.com","role":"authenticated"}', true);
+  insert into public.slots (id, pool_id, coach_id, starts_at, duration_min, price, status, created_by)
+  values ('44444444-4444-4444-4444-4444444444c2', v_pool, v_coach, now() + interval '41 hours', 60, 50, 'booked', v_coach);
+  insert into public.bookings (slot_id, student_name, first_name, last_name, email, phone)
+  values ('44444444-4444-4444-4444-4444444444c2', 'Staff Cancelled', 'Staff', 'Cancelled', 'vtest-sc@example.com', '2045550005');
+  update public.bookings set status = 'cancelled' where slot_id = '44444444-4444-4444-4444-4444444444c2';
+  if (select cancelled_by from public.bookings where slot_id = '44444444-4444-4444-4444-4444444444c2') = 'staff' then
+    rep := rep || E'\nPASS  G2: staff cancel tagged cancelled_by=staff'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  G2: staff cancel mis-tagged'; nfail := nfail + 1; end if;
+
+  -- G3: the panel lists the client one and EXCLUDES the staff one entirely
+  r := public.get_recent_cancellations(14, null, false);
+  if exists (select 1 from json_array_elements(r->'cancellations') c where c->>'student_name' = 'Cx Kid')
+     and not exists (select 1 from json_array_elements(r->'cancellations') c where c->>'student_name' = 'Staff Cancelled') then
+    rep := rep || E'\nPASS  G3: panel lists client cancellations, excludes staff-cancelled'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  G3: ' || r::text; nfail := nfail + 1; end if;
+
+  -- G3b: rain-outs are structurally absent (status rained_out, never cancelled)
+  select count(*) into n from json_array_elements(r->'cancellations') c
+  where (c->>'student_name') = 'Kid Fixture';
+  if n = 0 then rep := rep || E'\nPASS  G3b: rained-out bookings never appear in the panel'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  G3b: ' || n || ' rained-out rows leaked into the panel'; nfail := nfail + 1; end if;
+
+  -- G4: the state shown is the slot's CURRENT one — rebook it and it flips
+  update public.slots set status = 'booked' where id = '44444444-4444-4444-4444-4444444444c1';
+  r := public.get_recent_cancellations(14, null, false);
+  if (select c->>'slot_status' from json_array_elements(r->'cancellations') c
+      where c->>'student_name' = 'Cx Kid' limit 1) = 'booked' then
+    rep := rep || E'\nPASS  G4: state follows the slot — reopened → rebooked'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  G4: slot_status did not follow the slot'; nfail := nfail + 1; end if;
+
+  -- G5: only-open filter drops it now that it is rebooked
+  r := public.get_recent_cancellations(14, null, true);
+  if not exists (select 1 from json_array_elements(r->'cancellations') c where c->>'student_name' = 'Cx Kid') then
+    rep := rep || E'\nPASS  G5: only-open filter excludes the rebooked slot'; npass := npass + 1;
+  else rep := rep || E'\nFAIL  G5: rebooked slot still listed under only-open'; nfail := nfail + 1; end if;
+
+  -- G6/G7: prefs + seen stamp are writable on your OWN row only. Must run as
+  -- the API role, otherwise the DO block's superuser context bypasses grants.
+  execute 'set local role authenticated';
+  begin
+    with u as (update public.profiles
+               set cancellations_seen_at = now(), notify_cancellations = false
+               where id = v_coach returning 1)
+    select count(*) into n from u;
+    if n = 1 and (select notify_cancellations from public.profiles where id = v_coach) = false then
+      rep := rep || E'\nPASS  G6: coach sets their OWN notification prefs + seen stamp'; npass := npass + 1;
+    else rep := rep || E'\nFAIL  G6: own-row pref write did not apply (n=' || n || ')'; nfail := nfail + 1; end if;
+  exception when others then
+    rep := rep || E'\nFAIL  G6: own-row pref write raised: ' || sqlerrm; nfail := nfail + 1;
+  end;
+  begin
+    with u as (update public.profiles set notify_cancellations = false
+               where id = v_admin returning 1)
+    select count(*) into n from u;
+    if n = 0 then rep := rep || E'\nPASS  G7: coach cannot change ANOTHER user''s prefs (0 rows)'; npass := npass + 1;
+    else rep := rep || E'\nFAIL  G7: coach wrote another user''s prefs'; nfail := nfail + 1; end if;
+  exception when others then
+    rep := rep || E'\nPASS  G7: coach cannot change another user''s prefs (' || sqlerrm || ')'; npass := npass + 1;
+  end;
+  execute 'reset role';
+
+  -- G8: anon cannot read the panel at all
+  perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+  execute 'set local role anon';
+  begin
+    perform public.get_recent_cancellations(14, null, false);
+    rep := rep || E'\nFAIL  G8: anon read the cancellations panel'; nfail := nfail + 1;
+  exception when insufficient_privilege then
+    rep := rep || E'\nPASS  G8: anon lacks EXECUTE on get_recent_cancellations'; npass := npass + 1;
+  when others then rep := rep || E'\nFAIL  G8: unexpected: ' || sqlerrm; nfail := nfail + 1;
+  end;
+  execute 'reset role';
+
   -- ==================== report (the exception rolls everything back) ====================
   raise exception using message =
     E'\n\n===== VERIFY_V6 REPORT (this ERROR wrapper is intentional — it forces the rollback of all test data) =====\n' ||

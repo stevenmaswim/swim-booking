@@ -160,8 +160,11 @@ await page.evaluateOnNewDocument(() => {
   };
   window.__fixtures = {
     profiles: [
-      { id: "admin-1", display_name: "Admin A", bio: "", is_public: true, role: "admin", photo_url: null },
-      { id: "co1", display_name: "Coach B", bio: "", is_public: true, role: "coach", photo_url: null },
+      { id: "admin-1", display_name: "Admin A", bio: "", is_public: true, role: "admin", photo_url: null,
+        notify_cancellations: true, notify_unassigned_cancellations: true,
+        cancellations_seen_at: new Date(Date.now() - 3 * 864e5).toISOString() },
+      { id: "co1", display_name: "Coach B", bio: "", is_public: true, role: "coach", photo_url: null,
+        notify_cancellations: true, notify_unassigned_cancellations: true, cancellations_seen_at: null },
     ],
     pools: [{ id: "p1", name: "Main Pool", address: "1 Pool St", notes: "", active: true, photo_url: null }],
     settings: [{ default_price: 50 }],
@@ -169,6 +172,9 @@ await page.evaluateOnNewDocument(() => {
       { id: "so", starts_at: at(9),  duration_min: 60, status: "open",       pool_id: "p1", coach_id: "co1", rained_out_at: null, pools: { name: "Main Pool", address: "1 Pool St" }, profiles: { display_name: "Coach B" }, bookings: [] },
       { id: "sb", starts_at: at(11), duration_min: 60, status: "booked",     pool_id: "p1", coach_id: "co1", rained_out_at: null, pools: { name: "Main Pool", address: "1 Pool St" }, profiles: { display_name: "Coach B" }, bookings: [{ first_name: "Kid", last_name: "One", email: "k@x.com", phone: "1", parent_name: "P", created_at: at(8), status: "confirmed" }] },
       { id: "sr", starts_at: at(15), duration_min: 60, status: "rained_out", pool_id: "p1", coach_id: "co1", rained_out_at: at(8), pools: { name: "Main Pool", address: "1 Pool St" }, profiles: { display_name: "Coach B" }, bookings: [{ first_name: "Wet", last_name: "Kid", email: "w@x.com", phone: "1", parent_name: "P", created_at: at(7), status: "rained_out" }] },
+      // definitively FUTURE rained slot: "Undo rain-out" is future-only by
+      // design, so this keeps that assertion independent of the clock.
+      { id: "sr2", starts_at: at(15, 1), duration_min: 60, status: "rained_out", pool_id: "p1", coach_id: "co1", rained_out_at: at(8), pools: { name: "Main Pool", address: "1 Pool St" }, profiles: { display_name: "Coach B" }, bookings: [] },
     ],
     bookings: [
       { client_id: "c1", status: "confirmed",  slots: { starts_at: at(11) } },
@@ -187,10 +193,13 @@ check("staff dash: rained slot renders distinctly on the calendar",
     const el = document.querySelector('.cal-block.slot-rained[data-slot-id="sr"]');
     return !!el && el.textContent.includes("Rained out");
   }));
-check("staff dash: upcoming table has Rain out on open/booked + Undo on rained",
-  await page.evaluate(() =>
-    document.querySelectorAll("#slotAdminList [data-rain]").length === 2 &&
-    document.querySelectorAll('#slotAdminList [data-undorain="sr"]').length === 1));
+await page.waitForFunction(() => document.querySelectorAll("#slotAdminList tr").length > 1);
+const slotAdmin = await page.evaluate(() => ({
+  rain: document.querySelectorAll("#slotAdminList [data-rain]").length,
+  undo: document.querySelectorAll('#slotAdminList [data-undorain="sr2"]').length,
+}));
+check("staff dash: upcoming table has Rain out on open/booked + Undo on a future rained slot",
+  slotAdmin.rain === 2 && slotAdmin.undo === 1, JSON.stringify(slotAdmin));
 
 // bulk flow: dry-run preview, then confirm → one deduped email invoke
 await page.evaluate(() => {
@@ -270,6 +279,88 @@ await page.click("#weekExport");
 await page.waitForFunction(() => window.__csv);
 check("staff dash: week CSV labels the rained slot RAINED OUT",
   await page.evaluate(() => window.__csv.text.includes('"RAINED OUT"')));
+
+// ---- 5. Recently Cancelled panel (v11) ----
+await page.evaluate(() => {
+  const ago = (h) => new Date(Date.now() - h * 3600e3).toISOString();
+  const soon = (h) => new Date(Date.now() + h * 3600e3).toISOString();
+  // The RPC is the server-side gate: it only ever returns client
+  // cancellations, so staff-cancelled and rained-out rows simply aren't here.
+  window.__rpcHandlers.get_recent_cancellations = (args) => {
+    const rows = [
+      { id: "cx1", cancelled_at: ago(1), student_name: "Emma Lee", first_name: "Emma",
+        email: "emma@x.com", phone: "204-555-1111", slot_id: "sl-open", starts_at: soon(30),
+        duration_min: 60, slot_status: "open", coach_id: "co1", pool_name: "Canyon Creek",
+        coach: "Coach B", seconds_before: 30 * 3600 },
+      { id: "cx2", cancelled_at: ago(50), student_name: "Liam Ray", first_name: "Liam",
+        email: "liam@x.com", phone: null, slot_id: "sl-rebooked", starts_at: soon(80),
+        duration_min: 60, slot_status: "booked", coach_id: "co1", pool_name: "Main Pool",
+        coach: "Coach B", seconds_before: 5 * 3600 },
+    ];
+    return { data: { cancellations: args.p_only_open ? rows.filter((r) => r.slot_status === "open") : rows }, error: null };
+  };
+});
+await page.evaluate(() => { document.querySelector('[data-tab="bookings"]').click(); });
+await page.waitForFunction(() => document.querySelectorAll("#cxList tr").length > 1);
+const cxHtml = await page.$eval("#cxList", (e) => e.innerHTML);
+check("cx: client cancellation shows as reopened & still available",
+  cxHtml.includes("Reopened &amp; still available") && cxHtml.includes("Emma"));
+check("cx: a slot taken by someone else reads Rebooked",
+  cxHtml.includes("Rebooked by someone else"));
+check("cx: <24h notice reuses the late-cancel badge, longer notice does not",
+  cxHtml.includes("Cancelled &lt;24h — 5h before") && cxHtml.includes("30h before"));
+check("cx: only the coach's own filter + only-open reach the RPC",
+  await page.evaluate(() => {
+    const c = window.__rpcCalls.filter((x) => x.name === "get_recent_cancellations").pop();
+    return c.args.p_days === 14 && "p_coach_id" in c.args && "p_only_open" in c.args;
+  }));
+
+// "only slots still open" filter drops the rebooked row
+await page.evaluate(() => { document.getElementById("cxOnlyOpen").checked = true; document.getElementById("cxOnlyOpen").onchange(); });
+await page.waitForFunction(() => !document.getElementById("cxList").innerHTML.includes("Rebooked"));
+check("cx: only-open filter hides rebooked slots",
+  !(await page.$eval("#cxList", (e) => e.innerHTML)).includes("Rebooked by someone else"));
+
+// unread badge: coach's seen_at is null → both rows unread; viewing clears it
+await page.evaluate(() => { document.getElementById("cxOnlyOpen").checked = false; document.getElementById("cxOnlyOpen").onchange(); });
+await page.waitForFunction(() => document.querySelectorAll("#cxList tr").length > 2);
+check("cx: unread badge counts cancellations newer than last-viewed",
+  await page.evaluate(() => {
+    myProfile.cancellations_seen_at = new Date(Date.now() - 2 * 3600e3).toISOString();
+    renderCxBadge();
+    const el = document.getElementById("cxBadge");
+    return el.style.display !== "none" && el.textContent === "1 new";
+  }));
+check("cx: viewing the panel clears the badge and stamps the profile server-side",
+  await page.evaluate(async () => {
+    await markCancellationsSeen();
+    const el = document.getElementById("cxBadge");
+    return el.style.display === "none" && !!myProfile.cancellations_seen_at;
+  }));
+
+// profile toggles present, default ON, admin-only one visible for admins
+await page.evaluate(() => { document.querySelector('[data-tab="me"]').click(); });
+check("cx: coach notification toggle defaults ON",
+  await page.$eval("#meNotifyCx", (e) => e.checked));
+check("cx: admin-only unassigned toggle visible for an admin",
+  await page.$eval("#meNotifyUnassignedWrap", (e) => e.style.display !== "none"));
+
+// ---- 6. the cancel path fires exactly one alert invoke ----
+await page.goto(`${BASE}/mybookings.html`, { waitUntil: "networkidle0" });
+await page.evaluate(() => {
+  window.__rpcHandlers.cancel_booking = () => ({ data: { cancelled: true, booking_id: "bk-9", starts_at: new Date().toISOString() }, error: null });
+  window.__rpcHandlers.verify_and_list_bookings = () => ({ data: { bookings: [] }, error: null });
+  window.confirm = () => true;
+  renderBookings([{ status: "confirmed", starts_at: new Date(Date.now() + 864e5).toISOString(),
+    duration_min: 60, first_name: "Kid", pool_name: "Main Pool", cancel_token: "tok-9" }]);
+});
+await page.click("#upcomingList [data-cancel]");
+await page.waitForFunction(() => window.__invokes.some((i) => i.body && i.body.type === "cancellation_alert"));
+check("cx: a CLIENT cancellation fires exactly one cancellation_alert with the booking id",
+  await page.evaluate(() => {
+    const a = window.__invokes.filter((i) => i.body && i.body.type === "cancellation_alert");
+    return a.length === 1 && a[0].body.booking_id === "bk-9";
+  }));
 
 // mybookings: distinct rained badge for clients
 await page.goto(`${BASE}/mybookings.html`, { waitUntil: "networkidle0" });

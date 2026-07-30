@@ -497,8 +497,13 @@
       document.getElementById('cancelPanel').style.display = 'block';
       document.getElementById('cancelBtn').onclick = async () => {
         if (!db) { showMsg('cancelMsg', 'Cancellation is unavailable until the site is configured — see the banner above.', 'error'); return; }
-        const { error } = await db.rpc('cancel_booking', { p_token: cancelToken });
+        const { data, error } = await db.rpc('cancel_booking', { p_token: cancelToken });
         if (error) { showMsg('cancelMsg', error.message, 'error'); return; }
+        // Tell the coach their slot just reopened (best-effort; the edge
+        // function re-checks that this really is a client cancellation).
+        if (data && data.booking_id) {
+          db.functions.invoke('emails', { body: { type: 'cancellation_alert', booking_id: data.booking_id } }).catch(() => {});
+        }
         showMsg('cancelMsg', 'Your booking has been cancelled. The spot is open again.', 'success');
         document.getElementById('cancelBtn').style.display = 'none';
         loadSlots();

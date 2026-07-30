@@ -137,8 +137,13 @@
 
       up.querySelectorAll('[data-cancel]').forEach(btn => btn.onclick = async () => {
         if (!confirm('Cancel this lesson? The spot will be reopened.')) return;
-        const { error } = await db.rpc('cancel_booking', { p_token: btn.dataset.cancel });
+        const { data, error } = await db.rpc('cancel_booking', { p_token: btn.dataset.cancel });
         if (error) { alert('Could not cancel: ' + error.message); return; }
+        // Tell the coach their slot just reopened (best-effort; the edge
+        // function re-checks that this really is a client cancellation).
+        if (data && data.booking_id) {
+          db.functions.invoke('emails', { body: { type: 'cancellation_alert', booking_id: data.booking_id } }).catch(() => {});
+        }
         refresh();
       });
     }
